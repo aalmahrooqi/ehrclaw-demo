@@ -15,18 +15,18 @@ mkdir -p data && curl -L -o data/synthea_sample_data_fhir_latest.zip "https://sy
 docker compose up -d
 ```
 
-The server listens on **http://localhost:8080**
+The server listens on **http://localhost:8081**
 
 | URL | Description |
 |---|---|
-| http://localhost:8080/ | HAPI FHIR web UI (search and browse resources) |
-| http://localhost:8080/fhir | FHIR R4 REST API base URL |
-| http://localhost:8080/fhir/metadata | CapabilityStatement |
+| http://localhost:8081/ | HAPI FHIR web UI (search and browse resources) |
+| http://localhost:8081/fhir | FHIR R4 REST API base URL |
+| http://localhost:8081/fhir/metadata | CapabilityStatement |
 
 Wait until the server is ready:
 
 ```bash
-curl http://localhost:8080/fhir/metadata
+curl http://localhost:8081/fhir/metadata
 ```
 
 ### Load Synthea data

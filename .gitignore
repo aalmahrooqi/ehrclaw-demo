@@ -22,6 +22,3 @@ credentials.json
 
 # Data
 data/
-
-# Miscellaneous
-.hapi/

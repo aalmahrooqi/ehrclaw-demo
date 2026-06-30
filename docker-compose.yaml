@@ -4,7 +4,7 @@ services:
     container_name: health-demo-hapi
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/hapi
       SPRING_DATASOURCE_USERNAME: admin
