@@ -1,0 +1,39 @@
+services:
+  hapi-fhir:
+    image: hapiproject/hapi:latest
+    container_name: health-demo-hapi
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/hapi
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: admin
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      HAPI_FHIR_ALLOW_EXTERNAL_REFERENCES: "true"
+      HAPI_FHIR_ALLOW_MULTIPLE_DELETE: "true"
+    volumes:
+      - ./.hapi/hapi.application.yaml:/app/config/application.yaml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: health-demo-hapi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d hapi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - hapi-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  hapi-postgres-data:
