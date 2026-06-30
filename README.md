@@ -38,3 +38,7 @@ python3 scripts/load_synthea.py --data-dir data
 ```
 
 This posts each Synthea transaction bundle to the FHIR API. The first full load takes a few minutes.
+
+
+## NLM Attribution Notice
+*This product uses publicly available data from the U.S. National Library of Medicine (NLM), National Institutes of Health, Department of Health and Human Services; NLM is not responsible for the product and does not endorse or recommend this or any other product.*
