@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://db:5432/hapi
+    username: admin
+    password: admin
+    driverClassName: org.postgresql.Driver
+  jpa:
+    properties:
+      hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+      hibernate.search.enabled: false
+
+hapi:
+  fhir:
+    fhir_version: R4
+    allow_external_references: true
+    allow_multiple_delete: true
+    auto_create_placeholder_reference_targets: true
