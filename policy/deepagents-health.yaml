@@ -42,13 +42,6 @@ network_policies:
       port: 443
     binaries:
     - path: /opt/venv/bin/python3
-  allow_host_docker_internal_8080:
-    name: allow_host_docker_internal_8080
-    endpoints:
-    - host: host.docker.internal
-      port: 8080
-    binaries:
-    - path: /usr/bin/curl
   allow_host_docker_internal_8081:
     name: allow_host_docker_internal_8081
     endpoints:
@@ -65,13 +58,6 @@ network_policies:
       access: read-write
       allowed_ips:
       - '172.18.0.1/32'
-    binaries:
-    - path: /usr/bin/curl
-  allow_host_openshell_internal_8080:
-    name: allow_host_openshell_internal_8080
-    endpoints:
-    - host: host.openshell.internal
-      port: 8080
     binaries:
     - path: /usr/bin/curl
   allow_kzrlppojinpcyyaipxnb_supabase_co_443:
