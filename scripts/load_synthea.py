@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_FHIR_URL = "http://localhost:8081/fhir"
-DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "synthea_sample_data_fhir_latest"
+DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def wait_for_server(fhir_url: str, timeout_seconds: int = 600) -> None:
