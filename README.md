@@ -4,12 +4,12 @@
 
 This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.io/) with PostgreSQL. Sample patient records live in `data/` and come from [Synthea](https://synthea.mitre.org/downloads).
 
-### Download Sample Data
+### 1. Download Sample Data
 ```bash
 mkdir -p data && curl -L -o data/synthea_sample_data_fhir_latest.zip "https://synthetichealth.github.io/synthea-sample-data/downloads/latest/synthea_sample_data_fhir_latest.zip" && unzip -q data/synthea_sample_data_fhir_latest.zip -d data
 ```
 
-### Start the server
+### 2. Start the server
 
 ```bash
 docker compose up -d
@@ -29,7 +29,7 @@ Wait until the server is ready:
 curl http://localhost:8081/fhir/metadata
 ```
 
-### Load Synthea data
+### 3. Load Synthea data
 
 With the server running, upload the bundles from `data/`:
 
