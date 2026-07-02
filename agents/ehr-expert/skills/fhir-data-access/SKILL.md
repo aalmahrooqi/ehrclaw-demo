@@ -11,8 +11,7 @@ Query the project's FHIR server over its REST API.
 
 - **Base URL**: `http://host.openshell.internal:8081/fhir`
 - **Version**: FHIR R4 (4.0.1), HAPI FHIR
-- **Auth**: none (local demo)
-- **Data**: synthetic Synthea patients
+- **Data**:  Patients Records
 
 
 ## Core request pattern
@@ -72,7 +71,6 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 | Immunizations | `Immunization` |
 | Care providers | `Practitioner`, `Organization` |
 
-Synthea stores prescribed medications as `MedicationRequest` (with `medicationCodeableConcept`), not `MedicationStatement`.
 
 ## Extracting fields
 
