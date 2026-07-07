@@ -1,0 +1,578 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hermes sandbox image — Hermes Agent + NemoClaw plugin inside OpenShell
+#
+# Layers PR-specific code (plugin, config, startup script) on top of the
+# pre-built Hermes base image. Mirrors the OpenClaw Dockerfile structure.
+#
+# HEALTH DEMO: this is the NemoClaw Hermes image template (vendored from
+# ~/.nemoclaw/source/agents/hermes/Dockerfile) with a few added layers for this
+# demo — search for "Health demo" below. Its COPY steps read from the NemoClaw
+# source tree, so it must be built with that tree as the build context; ./setup.sh
+# stages the required subtrees and runs `nemoclaw onboard --from`. When you pull a
+# newer nemoclaw, re-vendor this file and re-apply the "Health demo" blocks.
+
+ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:8dad3b989a9ed1e601743310b97be21be5f59f89f7913a47d04f3ec3c40b8ce6
+
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE}
+
+# Keep the final image contract explicit even when the published base image
+# changes independently of this Dockerfile.
+RUN set -eu; \
+    hermes_path="$(command -v hermes 2>/dev/null || true)"; \
+    if [ "$hermes_path" != "/usr/local/bin/hermes" ]; then \
+        echo "ERROR: expected hermes at /usr/local/bin/hermes, got ${hermes_path:-missing}" >&2; \
+        exit 1; \
+    fi; \
+    test -x /usr/local/bin/hermes; \
+    /usr/local/bin/hermes --version
+
+# Published base images can lag Dockerfile.base while local feature branches
+# still layer this final image on top. Invalid state: the selected base has
+# Hermes source under /opt/hermes but lacks hermes_cli/web_dist. Prebuild the
+# dashboard bundle here too so `hermes dashboard` never tries to run npm from
+# the sandbox user account. Remove this fallback after all supported base image
+# tags are built from Dockerfile.base with HERMES_WEB_DIST prepopulated.
+RUN set -eu; \
+    hermes_web_dist=/opt/hermes/hermes_cli/web_dist; \
+    hermes_web_dir=/opt/hermes/web; \
+    if [ ! -d "$hermes_web_dist" ]; then \
+        if [ ! -f "$hermes_web_dir/package.json" ]; then \
+            echo "ERROR: Hermes dashboard source missing at $hermes_web_dir" >&2; \
+            exit 1; \
+        fi; \
+        if [ -f "$hermes_web_dir/package-lock.json" ]; then \
+            npm ci --prefix "$hermes_web_dir" --prefer-offline --no-audit --no-fund; \
+            npm run build --prefix "$hermes_web_dir"; \
+            rm -rf "$hermes_web_dir/node_modules"; \
+        elif grep -q '"web"' /opt/hermes/package-lock.json; then \
+            npm ci --prefix /opt/hermes --prefer-offline --no-audit --no-fund; \
+            npm run build --prefix /opt/hermes --workspace web; \
+            npm ci --omit=dev --prefix /opt/hermes --prefer-offline --no-audit --no-fund; \
+        else \
+            echo "ERROR: Hermes dashboard at $hermes_web_dir is not covered by a pinned lockfile" >&2; \
+            exit 1; \
+        fi; \
+    fi; \
+    test -d "$hermes_web_dist"
+
+ENV HERMES_WEB_DIST="/opt/hermes/hermes_cli/web_dist"
+
+# Harden: remove unnecessary build tools and network probes. build-essential
+# comes from the base image for npm/node-gyp builds; the final image does not
+# compile anything, so strip the installed compiler packages and fail closed if
+# command shims survive.
+RUN set -eu; \
+    dpkg-query -W -f='${Package}\n' >/tmp/hermes-runtime-packages.txt; \
+    grep -E '^(build-essential|make|gcc|g\+\+|cpp|gcc-[0-9]+|g\+\+-[0-9]+|cpp-[0-9]+|[[:alnum:]_-]+-linux-gnu-(gcc|g\+\+|cpp)(-[0-9]+)?|netcat-openbsd|netcat-traditional|ncat)$' /tmp/hermes-runtime-packages.txt >/tmp/hermes-runtime-tool-packages.txt || true; \
+    if [ -s /tmp/hermes-runtime-tool-packages.txt ]; then xargs -r apt-get purge -y </tmp/hermes-runtime-tool-packages.txt; fi; \
+    rm -f /tmp/hermes-runtime-packages.txt /tmp/hermes-runtime-tool-packages.txt; \
+    apt-get autoremove --purge -y; \
+    rm -rf /var/lib/apt/lists/*; \
+    if command -v gcc >/dev/null 2>&1; then echo "ERROR: gcc survived runtime purge" >&2; exit 1; fi; \
+    if command -v g++ >/dev/null 2>&1; then echo "ERROR: g++ survived runtime purge" >&2; exit 1; fi; \
+    if command -v make >/dev/null 2>&1; then echo "ERROR: make survived runtime purge" >&2; exit 1; fi
+
+# Hermes' WeChat adapter (gateway/platforms/weixin.py:_make_ssl_connector)
+# builds aiohttp with ssl.create_default_context(cafile=certifi.where()),
+# bypassing SSL_CERT_FILE. Symlink certifi's bundle at SSL_CERT_FILE so
+# weixin TLS trusts the OpenShell L7 proxy CA. Done at image build (as
+# root, which has write perms on the venv) because at runtime root doesn't
+# see SSL_CERT_FILE and the gateway user can't write the venv.
+# The target doesn't need to exist at build time — OpenShell mounts it at
+# sandbox start; the forward-referencing symlink resolves then.
+ARG SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem
+# hadolint ignore=DL3059
+RUN _hermes_certifi=$(/opt/hermes/.venv/bin/python -c 'import certifi; print(certifi.where())') \
+    && ln -sf "$SSL_CERT_FILE" "$_hermes_certifi"
+
+# Hermes v2026.4.13+ auto-detects HTTPS_PROXY and skips fallback-IP
+# transport when a proxy is present. OpenShell handles REST credential
+# placeholder rewriting, hostname-based policy enforcement, and native
+# WebSocket credential rewrite at the egress boundary.
+ENV HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1
+ENV HERMES_TUI_DIR="/opt/hermes/ui-tui"
+
+# Copy NemoClaw plugin for Hermes (Python-based)
+COPY agents/hermes/plugin/ /opt/nemoclaw-hermes-plugin/
+RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
+
+# Copy config generator
+COPY agents/hermes/generate-config.ts /opt/nemoclaw-hermes-config/generate-config.ts
+COPY agents/hermes/config/ /opt/nemoclaw-hermes-config/config/
+COPY agents/hermes/host/managed-tool-gateway-matrix.json /opt/nemoclaw-hermes-config/managed-tool-gateway-matrix.json
+COPY src/lib/messaging/ /src/lib/messaging/
+RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
+    && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
+    && chmod -R a+rX /src/lib/messaging
+
+# Copy blueprint (shared infrastructure)
+COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+# Ensure sandbox user can read blueprint files copied as root
+RUN chmod -R a+rX /opt/nemoclaw-blueprint/
+
+# Copy startup script and the secret-boundary validator. The validator is the
+# single source of truth used by start.sh at cold start and by its root-owned
+# PID 1 lifecycle handler, so `recover` enforces the same boundary as startup.
+COPY scripts/lib/sandbox-init.sh /usr/local/lib/nemoclaw/sandbox-init.sh
+COPY scripts/lib/gateway-supervisor.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh
+COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
+COPY agents/hermes/start.sh /usr/local/bin/nemoclaw-start
+COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
+COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
+COPY agents/hermes/validate-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
+COPY agents/hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
+COPY agents/hermes/runtime-config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
+COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
+COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/
+# Dockerfile.base is the source of truth for rlimit hooks. This Hermes replay
+# only repairs stale bases predating the v0.0.69 base layer, which may lack the
+# profile hook, bashrc hook, or root-owned helper mode. Remove it once the
+# minimum supported Hermes sandbox base tag guarantees those artifacts and
+# test/sandbox-rlimit-hooks.test.ts covers that base.
+RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/sandbox-init.sh /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py \
+    && chown root:root /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/managed-gateway-control.py \
+    && chmod 700 /usr/local/bin/nemoclaw-gateway-control \
+    && chmod 500 /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/managed-gateway-control.py \
+    && chmod 444 /usr/local/lib/nemoclaw/gateway-supervisor.sh \
+    && if [ -d /usr/local/lib/nemoclaw/preloads ]; then \
+        chown -R 0:0 /usr/local/lib/nemoclaw/preloads \
+        && find /usr/local/lib/nemoclaw/preloads -type f -exec chmod 444 {} + \
+        && find /usr/local/lib/nemoclaw/preloads -type d -exec chmod 755 {} + \
+        ; \
+    fi \
+    && chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
+    && mkdir -p /etc/profile.d \
+    && printf '%s\n' \
+        '# NemoClaw sandbox resource limits — see sandbox-rlimits.sh (#2173)' \
+        '[ -f /usr/local/lib/nemoclaw/sandbox-rlimits.sh ] && . /usr/local/lib/nemoclaw/sandbox-rlimits.sh && harden_resource_limits --quiet && verify_resource_limits --quiet || true' \
+        > /etc/profile.d/nemoclaw-rlimits.sh \
+    && chmod 444 /etc/profile.d/nemoclaw-rlimits.sh \
+    && (chmod 644 /etc/bash.bashrc 2>/dev/null || true) \
+    && { printf '%s\n' \
+          '# NemoClaw sandbox resource limits — see sandbox-rlimits.sh (#2173)' \
+          '[ -f /usr/local/lib/nemoclaw/sandbox-rlimits.sh ] && . /usr/local/lib/nemoclaw/sandbox-rlimits.sh && harden_resource_limits --quiet && verify_resource_limits --quiet || true' \
+          ''; \
+        if [ -f /etc/bash.bashrc ]; then \
+          grep -Ev 'NemoClaw sandbox resource limits|sandbox-rlimits[.]sh' /etc/bash.bashrc || true; \
+        fi; \
+      } > /etc/bash.bashrc.new \
+    && mv /etc/bash.bashrc.new /etc/bash.bashrc \
+    && chmod 444 /etc/bash.bashrc
+
+# Build-time assertion: fail immediately if the validator was not installed or
+# made executable. Catches COPY path drift or a silent chmod failure.
+RUN test -x /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py \
+    || { echo "ERROR: validate-hermes-env-secret-boundary.py missing or not executable" >&2; exit 1; }
+
+# Cryptographic integrity gate for the two security-critical Python entrypoints
+# — the wrapper that enforces the runtime env secret boundary and the validator
+# it delegates to. Any content change to either file MUST be accompanied by an
+# updated hash below; otherwise the build fails. This blocks silent supply-
+# chain tampering of the build context (an attacker rewriting the file has to
+# also rewrite the Dockerfile-committed hash, which reviewers gate). Regenerate
+# with `sha256sum agents/hermes/{hermes-wrapper.py,validate-env-secret-boundary.py}`.
+ARG NEMOCLAW_HERMES_WRAPPER_SHA256=03e0afbe00e352d0dfcf14b99ea1821f9fd29f87dad49ce19add2ec96d1941cc
+ARG NEMOCLAW_HERMES_VALIDATOR_SHA256=d8ebac7143ce79061a86fefb79f2be9fb1d73f41229dc7144a1c157384947fd1
+# hadolint ignore=DL4006
+RUN printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_VALIDATOR_SHA256" /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py \
+    | sha256sum -c - \
+    || { echo "ERROR: validate-hermes-env-secret-boundary.py hash mismatch (update NEMOCLAW_HERMES_VALIDATOR_SHA256)" >&2; exit 1; }
+
+# Wrap the hermes CLI so the runtime env secret boundary is enforced for
+# `hermes gateway` no matter how it is invoked. The entrypoint guard alone left
+# a direct `docker exec ... hermes gateway run` able to start the gateway with
+# raw secret-shaped env vars (#4975). Relocate the real binary and install the
+# wrapper in its place; the wrapper reuses the same validator and execs the real
+# binary for every non-gateway subcommand. Re-assert --version through the
+# wrapper so a broken relocation fails the build.
+#
+# The wrapper's shebang pins `/usr/bin/python3 -I` (isolated mode); fail the
+# build if that absolute path is missing or non-executable so a base-image
+# upgrade that drops it cannot ship a wrapper that ENOEXECs at runtime.
+COPY agents/hermes/hermes-wrapper.py /usr/local/lib/nemoclaw/hermes-wrapper.py
+RUN test -x /usr/bin/python3 \
+    || { echo "ERROR: /usr/bin/python3 missing or not executable; hermes-wrapper shebang would ENOEXEC" >&2; exit 1; }
+# hadolint ignore=DL4006
+RUN printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_WRAPPER_SHA256" /usr/local/lib/nemoclaw/hermes-wrapper.py \
+    | sha256sum -c - \
+    || { echo "ERROR: hermes-wrapper.py hash mismatch (update NEMOCLAW_HERMES_WRAPPER_SHA256)" >&2; exit 1; }
+RUN mv /usr/local/bin/hermes /usr/local/bin/hermes.real \
+    && install -m 0755 /usr/local/lib/nemoclaw/hermes-wrapper.py /usr/local/bin/hermes \
+    && chmod 755 /usr/local/bin/hermes.real \
+    && /usr/local/bin/hermes --version
+
+# Build args for config that varies per deployment.
+ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
+ARG NEMOCLAW_PROVIDER_KEY=custom
+# User-selected upstream provider name (nvidia-prod, hermes-provider, ...).
+# Distinct from NEMOCLAW_PROVIDER_KEY, which carries the managed route key
+# ("inference" for proxied providers) needed at routing/runtime.
+ARG NEMOCLAW_UPSTREAM_PROVIDER=custom
+ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
+ARG NEMOCLAW_INFERENCE_API=openai-completions
+# CHAT_UI_URL is a legacy name shared with the OpenClaw build arg. For
+# Hermes this URL points at the browser dashboard. The OpenAI-compatible
+# API remains exposed separately on port 8642.
+ARG CHAT_UI_URL=http://127.0.0.1:18789
+ARG NEMOCLAW_MESSAGING_PLAN_B64=
+ARG NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=0
+ARG NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS_B64=W10=
+ARG NEMOCLAW_BUILD_ID=default
+ARG NEMOCLAW_DARWIN_VM_COMPAT=0
+
+# Promote build-args to env vars for the config generation script.
+ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
+    NEMOCLAW_PROVIDER_KEY=${NEMOCLAW_PROVIDER_KEY} \
+    NEMOCLAW_UPSTREAM_PROVIDER=${NEMOCLAW_UPSTREAM_PROVIDER} \
+    NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
+    NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
+    CHAT_UI_URL=${CHAT_UI_URL} \
+    NEMOCLAW_MESSAGING_PLAN_B64=${NEMOCLAW_MESSAGING_PLAN_B64} \
+    NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER=${NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER} \
+    NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS_B64=${NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS_B64}
+
+# Bake reduced messaging runtime metadata for the entrypoint. Hermes runtime
+# config refresh consumes generic manifest-owned aliases from this artifact.
+# hadolint ignore=DL3059
+RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase runtime-setup \
+    && runtime_plan=/usr/local/share/nemoclaw/messaging-runtime-plan.json \
+    && { [ ! -f "$runtime_plan" ] || { test ! -L "$runtime_plan" \
+    && node -e "const fs=require('fs'); const path=process.argv[1]; const st=fs.statSync(path); if (!st.isFile() || st.uid !== 0 || st.gid !== 0 || (st.mode & 0o022) !== 0) throw new Error('unsafe runtime plan file metadata'); const p=JSON.parse(fs.readFileSync(path,'utf8')); for (const k of ['agentRender','buildSteps','stateUpdates','healthChecks']) if (Object.hasOwn(p,k)) throw new Error('runtime plan contains unreduced key '+k); const runtimeSetup=p.runtimeSetup; const isObject=(v)=>v && typeof v === 'object' && !Array.isArray(v); if (!isObject(runtimeSetup) || !Array.isArray(runtimeSetup.nodePreloads) || !Array.isArray(runtimeSetup.envAliases) || !Array.isArray(runtimeSetup.secretScans) || !runtimeSetup.nodePreloads.every(isObject) || !runtimeSetup.envAliases.every(isObject) || !runtimeSetup.secretScans.every(isObject)) throw new Error('runtime plan missing reduced runtimeSetup shape');" "$runtime_plan"; }; }
+
+# Apply messaging agent-install hooks as root so Hermes Python packages can update
+# /opt/hermes/.venv before the runtime drops to the sandbox user.
+WORKDIR /opt/hermes
+# hadolint ignore=DL3059
+RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase agent-install
+
+# ── Health demo: bake nemo-relay into the image (installed as root, before the
+# runtime drops to the sandbox user). Baked at build time so nothing needs to
+# pip-install inside the running sandbox.
+# 0.4.0 (not 0.3) is required: the PII-redaction guardrail component
+# (kind = "pii_redaction") and managed-execution support used by our
+# plugins.toml were introduced in 0.4.0 and do not exist in 0.3.
+RUN /usr/local/bin/uv pip install nemo-relay==0.4.0
+
+WORKDIR /sandbox
+USER sandbox
+
+# Set up blueprint for local resolution
+RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
+    && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/
+
+# Run Hermes' upstream repair before NemoClaw writes the generated config.yaml
+# and .env that become the startup integrity trust anchor. Doctor-created
+# defaults are overwritten by the generator below.
+# Generate Hermes config.yaml and .env from build args.
+# Config is mutable by default (600 sandbox:sandbox). Immutability is opt-in
+# via `shields up`. .env holds API key placeholders for OpenShell provider pipeline.
+# SECURITY: Uses a separate script file instead of inline code to avoid
+# code injection via build-arg interpolation (same concern as OpenClaw C-2).
+RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix \
+    && node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts
+
+# Install NemoClaw plugin into Hermes
+# hadolint ignore=DL3059
+RUN mkdir -p /sandbox/.hermes/plugins/nemoclaw \
+    && cp -r /opt/nemoclaw-hermes-plugin/* /sandbox/.hermes/plugins/nemoclaw/
+
+# Apply messaging render and post-agent-install build-file hooks after agent/plugin installation.
+# hadolint ignore=DL3059
+RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase post-agent-install
+
+# ── Health demo: enable the NeMo-Relay observability plugin in the SANDBOX
+# agent's config. This must run here, and this way:
+#   * as USER sandbox with HERMES_HOME=/sandbox/.hermes, so it writes the
+#     sandbox agent's config — not root's default home (the original bug);
+#   * AFTER generate-config.ts creates config.yaml, or the enable is clobbered;
+#   * AFTER the messaging post-agent-install hooks, so nothing rewrites it away;
+#   * BEFORE the later config-hash / immutability steps freeze config.yaml.
+# hadolint ignore=DL3059
+RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes plugins enable observability/nemo_relay
+
+# Write the SOUL.md (agent identity) for the sandboxed agent.
+# HEALTH DEMO: instead of the stock Hermes default soul, ship the ehr-expert
+# identity (agents/ehr-expert/SOUL.md) and its skills (agents/ehr-expert/skills)
+# from the repo. setup.sh stages these under health-demo/ in the build context.
+# The OpenShell/NemoClaw environment is described separately via
+# HERMES_ENVIRONMENT_HINT (below), which Hermes appends to the system prompt's
+# environment-hints block — the correct slot for execution-environment facts,
+# keeping the identity slot unmodified.
+# Running as USER sandbox here, so --chown keeps these readable/writable by the agent.
+RUN mkdir -p /sandbox/.hermes/memories
+COPY --chown=sandbox:sandbox health-demo/SOUL.md /sandbox/.hermes/SOUL.md
+COPY --chown=sandbox:sandbox health-demo/skills/ /sandbox/.hermes/skills/
+
+# Health demo: ship the NeMo-Relay component config (observability + adaptive
+# managed execution + pii_redaction guardrail). Hermes reads this at runtime
+# when HERMES_NEMO_RELAY_PLUGINS_TOML points at it (set in .env below). COPY
+# creates the parent dir; the ATOF/ATIF output dirs under it are created later.
+COPY --chown=sandbox:sandbox health-demo/plugins.toml /sandbox/.nemo-relay/plugins.toml
+
+# Describe the execution environment via Hermes's dedicated environment-hint
+# mechanism (agent/prompt_builder.py:build_environment_hints). This lands in
+# the system prompt's environment slot, not the identity slot, and is read once
+# at prompt-build time so it stays in the cache-safe portion of the prompt.
+ENV HERMES_ENVIRONMENT_HINT="You are running inside an NVIDIA OpenShell sandbox, with inference routed through NemoClaw. Your terminal, file, and web tools execute against the sandbox filesystem and egress through the OpenShell L7 proxy, which enforces network policy and rewrites credentials at the boundary, so you never see raw secrets. Your config and memory live under /sandbox/.hermes and are mutable unless shields are up. Work within the sandbox boundary."
+
+# Set mutable-default permissions (640 files, 3770 config root).
+# The sandbox user can write config; the gateway user can read it via
+# supplementary sandbox-group membership and create Hermes v0.14 runtime dirs
+# without being able to remove sticky-protected config files. Shields-up applies
+# 444 root:root + chattr +i.
+# hadolint ignore=DL3002
+USER root
+
+# Flatten stale published base images that still contain the old .hermes-data
+# symlink bridge. The base resolver owns published-image provenance and exports
+# immutable digests; this final-image boundary owns layout validation so local,
+# rebuilt, and caller-selected bases remain supported. Retired OpenClaw state
+# must never enter a Hermes final image. OpenShell starts the sandbox as the
+# sandbox user, so the .hermes-data migration cannot rely on root privileges
+# inside the pod.
+# hadolint ignore=DL4006
+RUN set -eu; \
+    config_dir=/sandbox/.hermes; \
+    data_dir=/sandbox/.hermes-data; \
+    openclaw_dir=/sandbox/.openclaw; \
+    if [ -e "$openclaw_dir" ] || [ -L "$openclaw_dir" ]; then \
+        echo "ERROR: Hermes base image contains retired OpenClaw state: $openclaw_dir" >&2; \
+        exit 1; \
+    fi; \
+    mkdir -p "$config_dir"; \
+    if [ -L "$data_dir" ]; then \
+        echo "ERROR: refusing legacy layout cleanup because $data_dir is a symlink" >&2; \
+        exit 1; \
+    fi; \
+    if [ -d "$data_dir" ]; then \
+        legacy_link="$(find "$data_dir" -type l -print -quit)"; \
+        if [ -n "$legacy_link" ]; then \
+            echo "ERROR: refusing legacy layout cleanup because $legacy_link is a symlink" >&2; \
+            exit 1; \
+        fi; \
+        for entry in "$data_dir"/*; do \
+            [ -e "$entry" ] || [ -L "$entry" ] || continue; \
+            name="$(basename "$entry")"; \
+            target="$config_dir/$name"; \
+            if [ -L "$target" ]; then \
+                rm -f "$target"; \
+            fi; \
+            if [ -d "$entry" ]; then \
+                mkdir -p "$target"; \
+                cp -a "$entry"/. "$target"/; \
+            elif [ ! -e "$target" ]; then \
+                cp -a "$entry" "$target"; \
+            fi; \
+        done; \
+        data_real="$(readlink -f "$data_dir" 2>/dev/null || printf '%s' "$data_dir")"; \
+        while :; do \
+            replaced_marker="$(mktemp)"; \
+            rm -f "$replaced_marker"; \
+            find "$config_dir" -type l -print | while IFS= read -r link; do \
+                raw_target="$(readlink "$link" 2>/dev/null || true)"; \
+                resolved_target="$(readlink -f "$link" 2>/dev/null || true)"; \
+                legacy_target=0; \
+                case "$raw_target" in "$data_real"/* | "$data_dir"/*) legacy_target=1 ;; esac; \
+                case "$resolved_target" in "$data_real"/* | "$data_dir"/*) legacy_target=1 ;; esac; \
+                if [ "$legacy_target" -eq 1 ]; then \
+                    copy_target="$resolved_target"; \
+                    if [ -z "$copy_target" ] || { [ ! -e "$copy_target" ] && [ ! -L "$copy_target" ]; }; then \
+                        copy_target="$raw_target"; \
+                    fi; \
+                    if [ -d "$copy_target" ] && [ ! -L "$copy_target" ]; then \
+                            rm -f "$link"; \
+                            mkdir -p "$link"; \
+                            cp -a "$copy_target"/. "$link"/; \
+                    elif [ -e "$copy_target" ] || [ -L "$copy_target" ]; then \
+                            rm -f "$link"; \
+                            cp -a "$copy_target" "$link"; \
+                    else \
+                        echo "ERROR: legacy symlink target missing: $link -> ${raw_target:-$resolved_target}" >&2; \
+                        exit 1; \
+                    fi; \
+                    : > "$replaced_marker"; \
+                fi; \
+            done; \
+            if [ ! -e "$replaced_marker" ]; then \
+                rm -f "$replaced_marker"; \
+                break; \
+            fi; \
+            rm -f "$replaced_marker"; \
+        done; \
+        rm -rf "$data_dir"; \
+    fi; \
+    mkdir -p "$config_dir/memories" \
+        "$config_dir/sessions" \
+        "$config_dir/skills" \
+        "$config_dir/plugins" \
+        "$config_dir/cron" \
+        "$config_dir/logs" \
+        "$config_dir/logs/curator" \
+        "$config_dir/skins" \
+        "$config_dir/plans" \
+        "$config_dir/workspace" \
+        "$config_dir/profiles" \
+        "$config_dir/cache" \
+        "$config_dir/hooks" \
+        "$config_dir/image_cache" \
+        "$config_dir/audio_cache" \
+        "$config_dir/pairing" \
+        "$config_dir/platforms" \
+        "$config_dir/platforms/whatsapp" \
+        "$config_dir/platforms/whatsapp/session" \
+        "$config_dir/weixin" \
+        "$config_dir/weixin/accounts" \
+        "$config_dir/runtime" \
+        "$config_dir/dashboard-home"; \
+    if [ -e "$data_dir" ] || [ -L "$data_dir" ]; then \
+        echo "ERROR: legacy data dir still exists after cleanup: $data_dir" >&2; \
+        exit 1; \
+    fi; \
+    data_real="$(readlink -f "$data_dir" 2>/dev/null || printf '%s' "$data_dir")"; \
+    find "$config_dir" -type l -print | while IFS= read -r link; do \
+        raw_target="$(readlink "$link" 2>/dev/null || true)"; \
+        resolved_target="$(readlink -f "$link" 2>/dev/null || true)"; \
+        case "$raw_target" in \
+            "$data_real"/* | "$data_dir"/*) \
+                echo "ERROR: legacy symlink remains after cleanup: $link -> $raw_target" >&2; \
+                exit 1; \
+                ;; \
+        esac; \
+        case "$resolved_target" in \
+            "$data_real"/* | "$data_dir"/*) \
+                echo "ERROR: legacy symlink remains after cleanup: $link -> $resolved_target" >&2; \
+                exit 1; \
+                ;; \
+        esac; \
+    done; \
+    rm -rf /root/.cache/pip /sandbox/.cache \
+    && chown -R sandbox:sandbox /sandbox/.hermes \
+    && chown gateway:sandbox /sandbox/.hermes/runtime \
+    && chmod 3770 /sandbox/.hermes \
+    && chmod 770 \
+        /sandbox/.hermes/memories \
+        /sandbox/.hermes/sessions \
+        /sandbox/.hermes/skills \
+        /sandbox/.hermes/plugins \
+        /sandbox/.hermes/cron \
+        /sandbox/.hermes/logs \
+        /sandbox/.hermes/logs/curator \
+        /sandbox/.hermes/skins \
+        /sandbox/.hermes/plans \
+        /sandbox/.hermes/workspace \
+        /sandbox/.hermes/profiles \
+        /sandbox/.hermes/cache \
+        /sandbox/.hermes/hooks \
+        /sandbox/.hermes/image_cache \
+        /sandbox/.hermes/audio_cache \
+        /sandbox/.hermes/pairing \
+        /sandbox/.hermes/platforms \
+        /sandbox/.hermes/platforms/whatsapp \
+        /sandbox/.hermes/platforms/whatsapp/session \
+        /sandbox/.hermes/weixin \
+        /sandbox/.hermes/weixin/accounts \
+        /sandbox/.hermes/runtime \
+        /sandbox/.hermes/dashboard-home \
+    && chmod 2770 \
+        /sandbox/.hermes/logs \
+        /sandbox/.hermes/logs/curator \
+        /sandbox/.hermes/platforms \
+        /sandbox/.hermes/platforms/whatsapp \
+        /sandbox/.hermes/platforms/whatsapp/session \
+    && chmod 2770 /sandbox/.hermes/runtime \
+    && chmod 640 /sandbox/.hermes/config.yaml \
+    && chmod 640 /sandbox/.hermes/.env \
+    && find -P /sandbox/.hermes/logs -type f -exec chown sandbox:sandbox {} + \
+    && find -P /sandbox/.hermes/logs -type f -exec chmod 660 {} + \
+    && for name in state.db state.db-wal state.db-shm gateway.lock gateway_state.json channel_directory.json; do \
+        rm -f "/sandbox/.hermes/${name}"; \
+        ln -s "runtime/${name}" "/sandbox/.hermes/${name}"; \
+    done \
+    && : > /sandbox/.hermes/.hermes_history \
+    && chown sandbox:sandbox /sandbox/.hermes/.hermes_history \
+    && chmod 660 /sandbox/.hermes/.hermes_history
+
+# ── Health demo: expose NeMo-Relay settings to the hermes process via .env ───
+# A prior attempt used an /etc/profile.d hook, but the `connect` session runs an
+# interactive NON-login shell, which never sources profile.d — so the vars
+# "still weren't loading". Hermes itself dotenv-loads ${HERMES_HOME}/.env
+# (agents/hermes/plugin/__init__.py), so putting them here makes `hermes chat`
+# see them regardless of how the shell was started.
+# CONSTRAINTS (do not reorder):
+#   * MUST run before the config-hash pin below, or the baked hash won't cover
+#     these lines and startup integrity verification fails.
+#   * MUST leave .env as sandbox:sandbox 0640, or the env secret-boundary
+#     validator (validate-env-secret-boundary.py) rejects the file posture.
+#   * Keys are non-secret (no TOKEN/KEY/SECRET/... word), so they pass that
+#     validator's raw-secret scan.
+# hadolint ignore=DL3059
+RUN printf '%s\n' \
+        '' \
+        '# Health demo: NeMo-Relay config (see Dockerfile)' \
+        '# plugins.toml is the primary config: observability + adaptive managed' \
+        '# execution + pii_redaction. When it initializes OK, NeMo Relay owns the' \
+        '# exporter lifecycle and the ATOF/ATIF env vars below are ignored; they' \
+        '# stay as a fallback used only if plugins.toml init fails.' \
+        'HERMES_NEMO_RELAY_PLUGINS_TOML=/sandbox/.nemo-relay/plugins.toml' \
+        'HERMES_NEMO_RELAY_ATOF_ENABLED=1' \
+        'HERMES_NEMO_RELAY_ATOF_OUTPUT_DIRECTORY=/sandbox/.nemo-relay/atof' \
+        'HERMES_NEMO_RELAY_ATIF_ENABLED=1' \
+        'HERMES_NEMO_RELAY_ATIF_OUTPUT_DIRECTORY=/sandbox/.nemo-relay/atif' \
+        >> /sandbox/.hermes/.env \
+    && chown sandbox:sandbox /sandbox/.hermes/.env \
+    && chmod 640 /sandbox/.hermes/.env
+
+# Pin config hash at build time for integrity verification at startup.
+RUN mkdir -p /etc/nemoclaw \
+    && sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
+    > /etc/nemoclaw/hermes.config-hash \
+    && chown root:root /etc/nemoclaw/hermes.config-hash \
+    && chmod 444 /etc/nemoclaw/hermes.config-hash
+
+# Backward-compatible marker for host-side shields logic on older sandboxes.
+RUN sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
+    > /sandbox/.hermes/.config-hash \
+    && chmod 640 /sandbox/.hermes/.config-hash \
+    && chown sandbox:sandbox /sandbox/.hermes/.config-hash
+
+# OpenShell's macOS VM backend currently remaps extracted rootfs ownership to
+# the host uid/gid before startup. Hermes uses /sandbox as a read_write path, so
+# that repair walks the trusted rc files too; keep this Darwin-only so Linux
+# Docker-driver sandboxes retain the tighter default permissions.
+RUN if [ "$NEMOCLAW_DARWIN_VM_COMPAT" = "1" ]; then \
+        chmod -R a+rwX /sandbox/.hermes; \
+        find /sandbox/.hermes -type d -exec chmod a+rwx {} +; \
+        chmod a+rw /sandbox/.bashrc /sandbox/.profile; \
+    fi
+
+# ── Health demo: NeMo-Relay observability env + output dirs ─────────────────
+# The authoritative wiring is the .env append above — Hermes dotenv-loads
+# ${HERMES_HOME}/.env, so `hermes chat` picks these up no matter how the shell
+# was started. (An earlier /etc/profile.d hook was dropped: the `connect`
+# session is an interactive NON-login shell, so it never sourced profile.d —
+# which is exactly why the vars "still weren't loading".)
+#
+# ENV is kept as belt-and-suspenders for any process the entrypoint spawns
+# directly with the image environment (not via a login shell or dotenv).
+# The output dirs are created here, owned by the sandbox user, so the plugin
+# can write ATOF/ATIF traces at runtime.
+# Running as USER root here (see USER root above).
+ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/sandbox/.nemo-relay/plugins.toml \
+    HERMES_NEMO_RELAY_ATOF_ENABLED=1 \
+    HERMES_NEMO_RELAY_ATOF_OUTPUT_DIRECTORY=/sandbox/.nemo-relay/atof \
+    HERMES_NEMO_RELAY_ATIF_ENABLED=1 \
+    HERMES_NEMO_RELAY_ATIF_OUTPUT_DIRECTORY=/sandbox/.nemo-relay/atif
+
+# hadolint ignore=DL3059
+RUN install -d -o sandbox -g sandbox \
+        /sandbox/.nemo-relay/atof /sandbox/.nemo-relay/atif
+
+# start.sh handles privilege separation: runs as root initially, then drops
+# to 'gateway' user via gosu for the agent process. See start.sh.
+ENTRYPOINT ["/usr/local/bin/nemoclaw-start"]
+CMD ["/bin/bash"]

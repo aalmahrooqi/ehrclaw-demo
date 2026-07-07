@@ -1,0 +1,58 @@
+version = 1
+
+[[components]]
+kind = "observability"
+enabled = true
+
+[components.config]
+version = 1
+
+[components.config.atof]
+enabled = true
+output_directory = "/sandbox/.nemo-relay/atof"
+
+
+[components.config.atif]
+enabled = true
+output_directory = "/sandbox/.nemo-relay/atif"
+
+[[components]]
+kind = "adaptive"
+enabled = true
+
+[components.config.tool_parallelism]
+mode = "observe_only"
+
+[[components]]
+kind = "pii_redaction"
+enabled = true
+
+[components.config]
+version = 1
+mode = "builtin"
+input = true
+output = true
+tool_input = true
+tool_output = true
+codec = "openai_chat"     
+
+[components.config.builtin]
+action = "mask"
+detector = "email"
+target_paths = []
+
+[[components]]
+kind = "nemo_guardrails"
+enabled = true
+
+[components.config]
+version = 1
+mode = "remote"
+codec = "openai_chat"
+input = true
+output = true
+
+[components.config.remote]
+endpoint = "http://host.docker.internal:8000"
+config_id = "nemo_guardrails"
+timeout_millis = 3000
