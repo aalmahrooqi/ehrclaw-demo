@@ -4,6 +4,21 @@
 
 This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.io/) with PostgreSQL. Sample patient records live in `data/` and come from [Synthea](https://synthea.mitre.org/downloads).
 
+## Requirements
+
+- **Python 3.13+**
+- **[uv](https://docs.astral.sh/uv/)** for dependency management
+- **Docker** (for the FHIR server)
+
+Install the Python dependencies and activate the virtual environment:
+
+```bash
+uv sync
+source .venv/bin/activate
+```
+
+`uv sync` creates a `.venv/` and installs the pinned dependencies from `pyproject.toml` / `uv.lock`.
+
 ### 1. Download Sample Data
 ```bash
 mkdir -p data && curl -L -o data/synthea_sample_data_fhir_latest.zip "https://synthetichealth.github.io/synthea-sample-data/downloads/latest/synthea_sample_data_fhir_latest.zip" && unzip -q data/synthea_sample_data_fhir_latest.zip -d data
