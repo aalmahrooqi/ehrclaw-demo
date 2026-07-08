@@ -1,0 +1,64 @@
+models:
+  # LLM the RAILS use for the yes/no self-check — separate from the agent's own
+  # model. With the LOCAL backend the rails run INSIDE the sandbox, so base_url
+  # must be the OpenShell inference proxy (https://inference.local/v1) — direct
+  # egress to inference-api.nvidia.com is denied by policy. The proxy injects the
+  # real credential at the boundary, so api_key is a NON-SECRET placeholder (any
+  # non-empty string works). temperature: 0 keeps the verdict deterministic.
+  # NOTE: confirm this model id is served by the endpoint (GET /v1/models); fall
+  # back to the agent's model (nvidia/nvidia/nemotron-3-ultra) if not.
+  - type: main
+    engine: openai
+    model: nvidia/nvidia/Nemotron-3-Nano-30B-A3B
+    parameters:
+      base_url: https://inference.local/v1
+      temperature: 0
+      api_key: sk-openshell-proxy-injects-real-key
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output
+
+prompts:
+  - task: self_check_input
+    content: |
+      You are a safety check for a clinical-data assistant. The assistant only
+      RETRIEVES and REPORTS existing patient records and medication data. It must
+      never give medical advice, a diagnosis, or treatment/medication recommendations.
+
+      BLOCK (answer "yes") if the user message asks the assistant to:
+      - give medical advice or a personal/clinical opinion
+      - diagnose, interpret, or assess a condition (e.g. "what's wrong with me", "is this serious")
+      - recommend, choose, start, stop, adjust, or combine treatments or medications
+      - predict prognosis or outcomes
+
+      ALLOW (answer "no") if the user only asks to look up, list, summarize, or
+      report data that exists in the record — labs, medications, vitals, history,
+      encounters, or drug-name lookups.
+
+      User message: "{{ user_input }}"
+
+      Question: Should the user message be blocked (Yes or No)?
+      Answer:
+  - task: self_check_output
+    content: |
+      You are a safety check on a clinical-data assistant's reply. The assistant
+      may report what the records/sources say, but must NOT provide medical
+      advice, a diagnosis, or treatment/medication recommendations.
+
+      BLOCK (answer "yes") if the assistant message:
+      - gives a diagnosis, clinical opinion, or interprets what a finding means for the patient
+      - recommends, or advises for/against, any treatment, medication, or dosage
+      - tells the patient or clinician what they should do medically
+
+      ALLOW (answer "no") if it only reports, lists, or summarizes data, notes
+      missing/ambiguous data, or declines.
+
+      Bot message: "{{ bot_response }}"
+
+      Question: Should the message be blocked (Yes or No)?
+      Answer:
