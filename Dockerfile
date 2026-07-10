@@ -6,12 +6,12 @@
 # Layers PR-specific code (plugin, config, startup script) on top of the
 # pre-built Hermes base image. Mirrors the OpenClaw Dockerfile structure.
 #
-# HEALTH DEMO: this is the NemoClaw Hermes image template (vendored from
+# EHR Claw: this is the NemoClaw Hermes image template (vendored from
 # ~/.nemoclaw/source/agents/hermes/Dockerfile) with a few added layers for this
-# demo — search for "Health demo" below. Its COPY steps read from the NemoClaw
+# demo — search for "EHR Claw" below. Its COPY steps read from the NemoClaw
 # source tree, so it must be built with that tree as the build context; ./setup.sh
 # stages the required subtrees and runs `nemoclaw onboard --from`. When you pull a
-# newer nemoclaw, re-vendor this file and re-apply the "Health demo" blocks.
+# newer nemoclaw, re-vendor this file and re-apply the "EHR Claw" blocks.
 
 ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:8dad3b989a9ed1e601743310b97be21be5f59f89f7913a47d04f3ec3c40b8ce6
 
@@ -250,13 +250,10 @@ WORKDIR /opt/hermes
 # hadolint ignore=DL3059
 RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase agent-install
 
-# ── Health demo: bake nemo-relay into the image (installed as root, before the
+# ── EHR Claw: bake nemo-relay into the image (installed as root, before the
 # runtime drops to the sandbox user). Baked at build time so nothing needs to
 # pip-install inside the running sandbox.
-# 0.4.0 (not 0.3) is required: the PII-redaction guardrail component
-# (kind = "pii_redaction") and managed-execution support used by our
-# plugins.toml were introduced in 0.4.0 and do not exist in 0.3.
-RUN /usr/local/bin/uv pip install nemo-relay==0.4.0
+RUN /usr/local/bin/uv pip install nemo-relay==0.5.0
 
 WORKDIR /sandbox
 USER sandbox
@@ -285,7 +282,7 @@ RUN mkdir -p /sandbox/.hermes/plugins/nemoclaw \
 # hadolint ignore=DL3059
 RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent hermes --phase post-agent-install
 
-# ── Health demo: enable the NeMo-Relay observability plugin in the SANDBOX
+# ── EHR Claw: enable the NeMo-Relay observability plugin in the SANDBOX
 # agent's config. This must run here, and this way:
 #   * as USER sandbox with HERMES_HOME=/sandbox/.hermes, so it writes the
 #     sandbox agent's config — not root's default home (the original bug);
@@ -296,7 +293,7 @@ RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-b
 RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes plugins enable observability/nemo_relay
 
 # Write the SOUL.md (agent identity) for the sandboxed agent.
-# HEALTH DEMO: instead of the stock Hermes default soul, ship the ehr-expert
+# EHR Claw: instead of the stock Hermes default soul, ship the ehr-expert
 # identity (agents/ehr-expert/SOUL.md) and its skills (agents/ehr-expert/skills)
 # from the repo. setup.sh stages these under health-demo/ in the build context.
 # The OpenShell/NemoClaw environment is described separately via
@@ -308,7 +305,7 @@ RUN mkdir -p /sandbox/.hermes/memories
 COPY --chown=sandbox:sandbox health-demo/SOUL.md /sandbox/.hermes/SOUL.md
 COPY --chown=sandbox:sandbox health-demo/skills/ /sandbox/.hermes/skills/
 
-# Health demo: ship the NeMo-Relay component config (observability + adaptive
+# EHR Claw: ship the NeMo-Relay component config (observability + adaptive
 # managed execution + pii_redaction guardrail). Hermes reads this at runtime
 # when HERMES_NEMO_RELAY_PLUGINS_TOML points at it (set in .env below). COPY
 # creates the parent dir; the ATOF/ATIF output dirs under it are created later.
@@ -497,7 +494,7 @@ RUN set -eu; \
     && chown sandbox:sandbox /sandbox/.hermes/.hermes_history \
     && chmod 660 /sandbox/.hermes/.hermes_history
 
-# ── Health demo: expose NeMo-Relay settings to the hermes process via .env ───
+# ── EHR Claw: expose NeMo-Relay settings to the hermes process via .env ───
 # A prior attempt used an /etc/profile.d hook, but the `connect` session runs an
 # interactive NON-login shell, which never sources profile.d — so the vars
 # "still weren't loading". Hermes itself dotenv-loads ${HERMES_HOME}/.env
@@ -513,7 +510,7 @@ RUN set -eu; \
 # hadolint ignore=DL3059
 RUN printf '%s\n' \
         '' \
-        '# Health demo: NeMo-Relay config (see Dockerfile)' \
+        '# EHR Claw: NeMo-Relay config (see Dockerfile)' \
         '# plugins.toml is the primary config: observability + adaptive managed' \
         '# execution + pii_redaction. When it initializes OK, NeMo Relay owns the' \
         '# exporter lifecycle and the ATOF/ATIF env vars below are ignored; they' \
@@ -550,7 +547,7 @@ RUN if [ "$NEMOCLAW_DARWIN_VM_COMPAT" = "1" ]; then \
         chmod a+rw /sandbox/.bashrc /sandbox/.profile; \
     fi
 
-# ── Health demo: NeMo-Relay observability env + output dirs ─────────────────
+# ── EHR Claw: NeMo-Relay observability env + output dirs ─────────────────
 # The authoritative wiring is the .env append above — Hermes dotenv-loads
 # ${HERMES_HOME}/.env, so `hermes chat` picks these up no matter how the shell
 # was started. (An earlier /etc/profile.d hook was dropped: the `connect`

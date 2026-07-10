@@ -53,6 +53,6 @@ input = true
 output = true
 
 [components.config.remote]
-endpoint = "http://host.docker.internal:8000"
+endpoint = "http://host.openshell.internal:8000"
 config_id = "nemo_guardrails"
 timeout_millis = 3000

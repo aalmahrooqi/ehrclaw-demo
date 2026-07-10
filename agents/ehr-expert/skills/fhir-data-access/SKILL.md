@@ -77,7 +77,7 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 Pipe responses through `python3` rather than parsing by eye:
 
 ```bash
-curl -s 'http://host.docker.internal:8081/fhir/Patient?_count=' | python3 -c "
+curl -s 'http://host.openshell.internal:8081/fhir/Patient?_count=' | python3 -c "
 import sys, json
 b = json.load(sys.stdin)
 for e in b.get('entry', []):

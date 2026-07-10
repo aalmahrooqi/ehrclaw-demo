@@ -23,13 +23,6 @@ process:
   run_as_user: sandbox
   run_as_group: sandbox
 network_policies:
-  allow_172_17_0_1_8081:
-    name: allow_172_17_0_1_8081
-    endpoints:
-    - host: '172.17.0.1'
-      port: 8081
-    binaries:
-    - path: /usr/bin/curl
   allow_api_fda_gov_443:
     name: allow_api_fda_gov_443
     endpoints:
@@ -38,15 +31,8 @@ network_policies:
     binaries:
     - path: /opt/venv/bin/python3
     - path: /usr/bin/curl
-  allow_host_docker_internal_8081:
-    name: allow_host_docker_internal_8081
-    endpoints:
-    - host: host.docker.internal
-      port: 8081
-    binaries:
-    - path: /usr/bin/curl
-  allow_host_internal_8081:
-    name: allow_host_internal_8081
+  allow_fhir_server_access:
+    name: allow_fhir_server_access
     endpoints:
     - host: host.openshell.internal
       port: 8081
