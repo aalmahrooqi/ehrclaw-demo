@@ -84,21 +84,7 @@ sandbox$ hermes chat
 
 ## NeMo Guardrails
 
-Runs a [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) server on the host to moderate the agent (e.g. block medical advice). The rails config lives in `configs/nemo_guardrails/`.
-
-1. Set your API key (copy `.env.example` to `.env` and fill it in):
-
-```bash
-cp .env.example .env   # then edit NVIDIA_API_KEY
-```
-
-2. Start the server:
-
-```bash
-./scripts/setup_nemoguardrails.sh
-```
-
-This loads `.env` and launches `nemoguardrails server --config ./configs/nemo_guardrails` (listens on **http://localhost:8000**).
+[NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) moderates the agent (e.g. blocks medical advice/drug reccomendations) via the `nemo_guardrails` component in `plugins/nemo_relay/plugins.toml`. It runs in **local** mode: NeMo Relay spawns an in-sandbox Python worker that runs self-check rails against every managed LLM turn.
 
 ## Skills
 
