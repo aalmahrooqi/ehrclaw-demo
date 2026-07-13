@@ -1,19 +1,11 @@
 models:
-  # LLM the RAILS use for the yes/no self-check — separate from the agent's own
-  # model. With the LOCAL backend the rails run INSIDE the sandbox, so base_url
-  # must be the OpenShell inference proxy (https://inference.local/v1) — direct
-  # egress to inference-api.nvidia.com is denied by policy. The proxy injects the
-  # real credential at the boundary, so api_key is a NON-SECRET placeholder (any
-  # non-empty string works). temperature: 0 keeps the verdict deterministic.
-  # NOTE: confirm this model id is served by the endpoint (GET /v1/models); fall
-  # back to the agent's model (nvidia/nvidia/nemotron-3-ultra) if not.
   - type: main
     engine: openai
     model: nvidia/nvidia/Nemotron-3-Nano-30B-A3B
     parameters:
       base_url: https://inference.local/v1
       temperature: 0
-      api_key: sk-openshell-proxy-injects-real-key
+      api_key: sk-OPENSHELL-PROXY-REWRITE
 
 rails:
   input:
@@ -25,6 +17,7 @@ rails:
 
 prompts:
   - task: self_check_input
+    max_tokens: 1024
     content: |
       You are a safety check for a clinical-data assistant. The assistant only
       RETRIEVES and REPORTS existing patient records and medication data. It must
@@ -45,6 +38,7 @@ prompts:
       Question: Should the user message be blocked (Yes or No)?
       Answer:
   - task: self_check_output
+    max_tokens: 1024
     content: |
       You are a safety check on a clinical-data assistant's reply. The assistant
       may report what the records/sources say, but must NOT provide medical

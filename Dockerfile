@@ -207,7 +207,7 @@ RUN mv /usr/local/bin/hermes /usr/local/bin/hermes.real \
     && /usr/local/bin/hermes --version
 
 # Build args for config that varies per deployment.
-ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
+ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra
 ARG NEMOCLAW_PROVIDER_KEY=custom
 # User-selected upstream provider name (nvidia-prod, hermes-provider, ...).
 # Distinct from NEMOCLAW_PROVIDER_KEY, which carries the managed route key
@@ -254,6 +254,28 @@ RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-b
 # runtime drops to the sandbox user). Baked at build time so nothing needs to
 # pip-install inside the running sandbox.
 RUN /usr/local/bin/uv pip install nemo-relay==0.5.0
+
+# ── EHR Claw: bake the NeMo Guardrails engine for the nemo_guardrails LOCAL
+# backend. The remote backend is a dead end for this agent — it rejects the
+# tools/tool_choice that every Hermes managed LLM call carries — so plugins.toml
+# runs the in-sandbox python worker instead: nemo_relay spawns
+# /opt/hermes/.venv/bin/python and imports nemoguardrails. Install into THAT venv
+# so the worker's interpreter can import it and, per policy, reach
+# https://inference.local for the self-check. Runtime pypi egress is denied, so
+# this MUST be baked at build time.
+#
+# nemo-relay 0.5.0's local worker hard-pins nemoguardrails==0.22.0, which in turn
+# hard-depends on `annoy`. annoy ships source-only on PyPI (no py3.13 wheel) and
+# the hardening step above stripped gcc/g++, so a normal install dies compiling
+# annoy's C++ extension. We vendor a prebuilt annoy cp313 wheel and point uv at
+# it via --find-links so no compiler is needed. annoy is only imported lazily for
+# the embeddings KB, which our self-check-only rails never touch, so its .so is
+# never loaded at runtime — the wheel only has to satisfy dependency resolution.
+COPY health-demo/wheels/ /opt/ehr-guardrails-wheels/
+RUN /usr/local/bin/uv pip install --python /opt/hermes/.venv/bin/python \
+        --find-links /opt/ehr-guardrails-wheels \
+        nemoguardrails==0.22.0 \
+    && rm -rf /opt/ehr-guardrails-wheels
 
 WORKDIR /sandbox
 USER sandbox
@@ -310,6 +332,13 @@ COPY --chown=sandbox:sandbox health-demo/skills/ /sandbox/.hermes/skills/
 # when HERMES_NEMO_RELAY_PLUGINS_TOML points at it (set in .env below). COPY
 # creates the parent dir; the ATOF/ATIF output dirs under it are created later.
 COPY --chown=sandbox:sandbox health-demo/plugins.toml /sandbox/.nemo-relay/plugins.toml
+
+# EHR Claw: ship the NeMo Guardrails rails config for the local backend. The
+# nemo_guardrails component (plugins.toml, mode="local") points config_path here;
+# the in-sandbox worker loads config.yml and the self-check prompts from it. Left
+# world-readable (0644 file / 0755 dir from COPY) so the gateway-user agent
+# process — which spawns the worker — can read it via sandbox-group membership.
+COPY --chown=sandbox:sandbox health-demo/guardrails/ /sandbox/.nemo-relay/guardrails/
 
 # Describe the execution environment via Hermes's dedicated environment-hint
 # mechanism (agent/prompt_builder.py:build_environment_hints). This lands in
