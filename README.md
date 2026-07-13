@@ -1,5 +1,16 @@
 # EHRClaw
 
+
+## Components
+
+| Component | Purpose |
+|---|---|
+| NemoClaw / OpenShell | Secure agent execution, tool isolation, network policy, and credential injection at the egress boundary |
+| Hermes | Agent runtime and skill orchestration |
+| NeMo Relay | Traces the agent's LLM/tool workflow (ATOF/ATIF exports) and manages adaptive execution, with NemoGuardrails plugin |
+| NeMo Guardrails | Blocks medical advice / drug recommendation requests |
+| HAPI FHIR | Stores and serves the patient / clinical records (FHIR R4) |
+
 ## FHIR Server
 
 This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.io/) with PostgreSQL. Sample patient records live in `data/` and come from [Synthea](https://synthea.mitre.org/downloads).
@@ -85,6 +96,8 @@ sandbox$ hermes chat
 ## NeMo Guardrails
 
 [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) moderates the agent (e.g. blocks medical advice/drug reccomendations) via the `nemo_guardrails` component in `plugins/nemo_relay/plugins.toml`. It runs in **local** mode: NeMo Relay spawns an in-sandbox Python worker that runs self-check rails against every managed LLM turn.
+
+The local backend requires `nemoguardrails==0.22.0`, which depends on `annoy` — a package that ships source-only on PyPI (no prebuilt wheel for Python 3.13). Since the hardened sandbox image has no C/C++ compiler, we vendor a prebuilt `annoy` wheel under `vendor/wheels/` and install from it at build time so nothing needs to compile inside the image.
 
 ## Skills
 
