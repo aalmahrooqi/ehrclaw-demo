@@ -55,6 +55,29 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 | `_include` | Include referenced resources | `_include=MedicationRequest:patient` |
 | `category` / `code` | Filter clinical resources | `category=laboratory` |
 | `status` | Filter by status | `status=completed` |
+| `birthdate` | Filter patients by date of birth (use `ge`/`le` prefixes for a range) | `birthdate=ge1960-01-01&birthdate=le2007-01-01` |
+| `gender` | Filter patients by administrative sex | `gender=male` |
+
+## Demographic and coded filtering
+
+FHIR has no `age` search parameter — translate an age range into a `birthdate`
+window (older bound = earlier date). For example, "18 to 65 as of today" becomes
+`birthdate=ge<today-65y>&birthdate=le<today-18y>`.
+
+```bash
+# Patients 18–65, female (coarse cohort filter)
+curl -s 'http://host.openshell.internal:8081/fhir/Patient?gender=female&birthdate=ge1960-01-01&birthdate=le2007-01-01&_count=100'
+
+# Patients with a coded condition (token = system|code, not free text)
+curl -s 'http://host.openshell.internal:8081/fhir/Condition?code=http://snomed.info/sct|44054006'
+
+# Combine with _summary=count to size a cohort before fetching bodies
+curl -s 'http://host.openshell.internal:8081/fhir/Condition?code=http://snomed.info/sct|44054006&_summary=count'
+```
+
+`Condition?code=` matches a coded diagnosis, so you need the code (e.g. a SNOMED
+CT code), not a free-text name. Resolve the term to a code first, or search
+broadly and filter the returned `code.coding` client-side.
 
 ## Resource type guide
 
@@ -63,6 +86,8 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 | Demographics | `Patient` |
 | Medications (prescribed) | `MedicationRequest` |
 | Medications (administered) | `MedicationAdministration` |
+| Medications (patient-reported / statement) | `MedicationStatement` |
+| Care plans | `CarePlan` |
 | Labs, vitals, measurements | `Observation` |
 | Diagnoses / problems | `Condition` |
 | Visits | `Encounter` |
