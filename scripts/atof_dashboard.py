@@ -75,6 +75,21 @@ class TraceStore:
             ]
             return out, self._seq
 
+    def prune(self, present: set[str]) -> list[str]:
+        """Forget files (and their buffered events) no longer in the sandbox.
+
+        `present` is the set of basenames currently found in the atof dir.
+        Returns the basenames that were dropped.
+        """
+        with self._lock:
+            gone = {b for b in self._file_counts if b and b not in present}
+            if not gone:
+                return []
+            self._events = [e for e in self._events if e.get("_file") not in gone]
+            for base in gone:
+                self._file_counts.pop(base, None)
+            return sorted(gone)
+
     def _file_list(self) -> list[dict]:
         # Collect every known basename, then sort by the timestamp embedded in
         # the filename (nemo-relay-events-YYYY-MM-DD-HH.MM.SS.jsonl), newest first.
@@ -185,6 +200,13 @@ def poll_loop() -> None:
         try:
             sizes = list_files()
             STORE.files = {p: STORE.files.get(p, 0) for p in sizes}
+
+            # Mirror deletions: forget files (+ their buffered events) that are
+            # no longer present in the sandbox dir.
+            present_paths = set(sizes)
+            for stale in [p for p in buffers if p not in present_paths]:
+                buffers.pop(stale, None)
+            STORE.prune({p.rsplit("/", 1)[-1] for p in present_paths})
 
             for path, size in sizes.items():
                 consumed = STORE.files.get(path, 0)
@@ -1159,6 +1181,7 @@ function handleEvent(ev) {
   }
 
   const row = el('div', 'row');
+  row.dataset.file = ev._file || '';
   const head = el('div', 'head');
   const body = el('div', 'body');
   head.addEventListener('click', () => row.classList.toggle('open'));
@@ -1257,6 +1280,18 @@ async function pollOnce() {
   countPill.textContent = shown + ' events';
   srcEl.textContent = data.sandbox + ' : ' + (selectedFile || data.dir);
   renderFileList(data.files || []);
+
+  // Reflect deletions: if a file vanished from the sandbox, drop its rows.
+  const present = new Set((data.files || []).map(f => f.name));
+  if (selectedFile && !present.has(selectedFile)) { selectFile(null); return; }
+  let removed = false;
+  stream.querySelectorAll('.row').forEach(r => {
+    const f = r.dataset.file;
+    if (f && !present.has(f)) { r.remove(); removed = true; }
+  });
+  if (removed) {
+    for (const k in openScopes) { if (!openScopes[k].el.isConnected) delete openScopes[k]; }
+  }
 
   const evs = data.events || [];
   if (evs.length) empty.style.display = 'none';
