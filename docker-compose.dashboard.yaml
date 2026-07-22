@@ -1,0 +1,29 @@
+# ATOF trace dashboard +  Hermes chat dashboard
+name: health-demo-dashboard
+services:
+  atof-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    image: health-demo-atof-dashboard
+    container_name: health-demo-atof-dashboard
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      HOME: ${DASH_HOME:-/home/aalmahrooqi}
+      PATH: ${DASH_HOME:-/home/aalmahrooqi}/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+      PYTHONUNBUFFERED: "1"
+      # Dashboard
+      ATOF_SANDBOX: ${ATOF_SANDBOX:-hermes-health}
+      ATOF_DIR: ${ATOF_DIR:-/sandbox/.nemo-relay/atof}
+      ATOF_HOST: ${ATOF_HOST:-127.0.0.1}
+      ATOF_PORT: ${ATOF_PORT:-8090}
+      ATOF_POLL_INTERVAL: ${ATOF_POLL_INTERVAL:-1.0}
+      HERMES_API_HOST: ${HERMES_API_HOST:-127.0.0.1}
+      HERMES_API_PORT: ${HERMES_API_PORT:-8642}
+      HERMES_DASHBOARD_PORT: ${HERMES_DASHBOARD_PORT:-18790}
+    volumes:
+      - ${DASH_HOME:-/home/aalmahrooqi}/.local:${DASH_HOME:-/home/aalmahrooqi}/.local:ro
+      - ${DASH_HOME:-/home/aalmahrooqi}/.nvm:${DASH_HOME:-/home/aalmahrooqi}/.nvm:ro
+      - ${DASH_HOME:-/home/aalmahrooqi}/.config:${DASH_HOME:-/home/aalmahrooqi}/.config:ro
+      - ${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:ro

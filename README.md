@@ -98,6 +98,23 @@ nemoclaw hermes-health connect
 sandbox$ hermes chat
 ```
 
+## Trace Dashboard
+
+A lightweight web dashboard for watching the agent work and interacting with it. It has three tabs:
+
+- **traces** — live stream of the agent's [ATOF](https://docs.nvidia.com/nemo/relay/) trace events (LLM calls, tool/skill usage, guardrail checks) from the sandbox, with a per-file browser, pretty JSON rendering, and raw `.jsonl` download.
+- **chat** — a custom chat UI that talks to the Hermes agent through the gateway, with streaming responses.
+- **hermes** — the native Hermes dashboard, embedded.
+
+With the `hermes-health` sandbox running, start it with Docker Compose:
+
+```bash
+docker compose -f docker-compose.dashboard.yaml up --build -d
+```
+
+Then open **http://127.0.0.1:8090**. To stop it: `docker compose -f docker-compose.dashboard.yaml down`.
+
+
 ## NeMo Guardrails
 
 [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) keeps the assistant on-task — it blocks the agent from giving medical advice or drug recommendations, so it stays a data-retrieval tool rather than a clinical decision-maker.
