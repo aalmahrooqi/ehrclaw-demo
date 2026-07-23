@@ -9,17 +9,19 @@ parses each JSON line and exposes them to a small single-page UI that polls for
 new events and renders them as a live trace timeline.
 
 Usage:
-    python3 scripts/atof_dashboard.py                 # defaults
-    python3 scripts/atof_dashboard.py --sandbox hermes-health --port 8090
+    python3 scripts/dashboard.py                 # defaults
+    python3 scripts/dashboard.py --sandbox hermes-health --port 8090
 
 Then open http://localhost:8090
 """
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -33,8 +35,23 @@ from urllib.parse import urlparse, parse_qs
 # ---------------------------------------------------------------------------
 SANDBOX = "hermes-health"
 ATOF_DIR = "/sandbox/.nemo-relay/atof"
+MEMORIES_DIR = "/sandbox/.hermes/memories"  # agent long-term memory (markdown files)
+SKILLS_DIR = "/sandbox/.hermes/skills"      # agent skill library (SKILL.md per skill)
+# Skills to surface under "Agent Custom Skills" (by dir id or leaf name under
+# SKILLS_DIR). Override via HERMES_CUSTOM_SKILLS / --custom-skills. If left empty
+# we fall back to auto-detecting anything not shipped in the base image.
+CUSTOM_SKILLS: set[str] = {
+    "summarize-patient-chart", "fhir-data-access", "fhir-prescribe",
+    "clinical-trial-cohort-prescreener", "drug-interaction-labels-check",
+    "rxnorm-resolve-cui",
+}
 POLL_INTERVAL = 1.0          # seconds between sandbox polls
+MEMORY_POLL_INTERVAL = 5.0   # seconds between memory-dir polls
+SKILL_POLL_INTERVAL = 8.0    # seconds between skill-dir polls
 MAX_EVENTS = 5000            # ring-buffer cap kept in memory / served to UI
+# Directory where the memory/skill activity feeds are persisted so they survive
+# a dashboard restart. Empty disables persistence (env DASHBOARD_STATE_DIR).
+STATE_DIR = ""
 EXEC_TIMEOUT = 30            # seconds for a single nemoclaw exec call
 HERMES_API_HOST = "127.0.0.1"  # host serving the forwarded Hermes agent API
 HERMES_API_PORT = 8642       # Hermes OpenAI-compatible agent API (inside sandbox, forwarded)
@@ -125,6 +142,296 @@ class TraceStore:
 
 
 STORE = TraceStore()
+
+
+def _mem_lines(content: str) -> list[str]:
+    """Split a memory file into the lines that carry meaning for a diff — drop
+    the ``§`` entry separators and blank lines so the diff shows facts, not
+    bookkeeping."""
+    return [ln for ln in content.splitlines() if ln.strip() not in ("", "§")]
+
+
+def _diff(old: str, new: str, lines_fn=None, context: int = 2, cap: int = 400) -> tuple[list[str], int, int]:
+    """Return (unified-diff lines, additions, deletions) between two blobs,
+    git-style. File header lines are stripped; hunk headers (@@) kept.
+    ``lines_fn`` splits a blob into comparable lines (defaults to raw
+    ``splitlines``; memory passes ``_mem_lines`` to ignore ``§`` separators)."""
+    split = lines_fn or (lambda s: s.splitlines())
+    lines = [
+        ln for ln in difflib.unified_diff(split(old), split(new), lineterm="", n=context)
+        if not ln.startswith(("---", "+++"))
+    ]
+    add = sum(1 for ln in lines if ln.startswith("+"))
+    dele = sum(1 for ln in lines if ln.startswith("-"))
+    return lines[:cap], add, dele
+
+
+def _save_state(name: str, data: dict) -> None:
+    """Atomically persist a feed's state under STATE_DIR (no-op if disabled)."""
+    if not STATE_DIR:
+        return
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        path = os.path.join(STATE_DIR, name)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 - persistence is best-effort
+        pass
+
+
+def _load_state(name: str) -> dict | None:
+    if not STATE_DIR:
+        return None
+    try:
+        with open(os.path.join(STATE_DIR, name), encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class MemoryStore:
+    """Snapshot of the agent's markdown memory files plus a change log, so the
+    UI can show both what the agent currently remembers and what it has learned
+    (added / updated / forgotten) over time."""
+
+    def __init__(self, max_events: int = 300):
+        self._lock = threading.Lock()
+        self._mem: dict[str, dict] = {}   # name -> {content, mtime, size}
+        self._events: list[dict] = []     # [{seq, name, ts, action, size}]
+        self._seq = 0
+        self._max = max_events
+        self._loaded = False
+        self._dirty = False
+        self.status = "connecting"        # connecting | live | error
+        self.error = ""
+
+    def _record(self, name: str, ts: float, action: str, size: int,
+                diff: list[str] | None = None, add: int = 0, dele: int = 0) -> None:
+        self._seq += 1
+        self._events.append(
+            {"seq": self._seq, "name": name, "ts": ts, "action": action, "size": size,
+             "diff": diff or [], "add": add, "del": dele}
+        )
+        if len(self._events) > self._max:
+            self._events = self._events[-self._max :]
+        self._dirty = True
+
+    def load(self, name: str) -> None:
+        """Restore a previously persisted feed so diffs survive a restart."""
+        data = _load_state(name)
+        if not data:
+            return
+        with self._lock:
+            self._seq = int(data.get("seq") or 0)
+            self._loaded = bool(data.get("loaded"))
+            self._events = data.get("events") or []
+            self._mem = data.get("mem") or {}
+
+    def maybe_save(self, name: str) -> None:
+        with self._lock:
+            if not self._dirty:
+                return
+            data = {"seq": self._seq, "loaded": self._loaded,
+                    "events": self._events, "mem": self._mem}
+            self._dirty = False
+        _save_state(name, data)
+
+    def update(self, snapshot: dict[str, dict]) -> None:
+        """Diff a freshly-read {name: {content, mtime, size}} snapshot against
+        the previous one, recording added / updated / removed events."""
+        with self._lock:
+            if not self._loaded:
+                # Seed the timeline from the files themselves, using each file's
+                # real mtime, so history reflects when memories were written even
+                # before this dashboard started. The diff is the whole file as
+                # additions (its state when we first saw it).
+                for name, meta in sorted(snapshot.items(), key=lambda kv: kv[1]["mtime"]):
+                    diff, add, dele = _diff("", meta["content"], _mem_lines)
+                    self._record(name, float(meta["mtime"]), "recorded", meta["size"], diff, add, dele)
+                self._mem = snapshot
+                self._loaded = True
+                return
+            now = time.time()
+            for name, meta in snapshot.items():
+                prev = self._mem.get(name)
+                if prev is None:
+                    diff, add, dele = _diff("", meta["content"], _mem_lines)
+                    self._record(name, now, "added", meta["size"], diff, add, dele)
+                elif prev["content"] != meta["content"]:
+                    diff, add, dele = _diff(prev["content"], meta["content"], _mem_lines)
+                    self._record(name, now, "updated", meta["size"], diff, add, dele)
+            for name in list(self._mem):
+                if name not in snapshot:
+                    diff, add, dele = _diff(self._mem[name]["content"], "", _mem_lines)
+                    self._record(name, now, "removed", 0, diff, add, dele)
+            self._mem = snapshot
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            mems = [
+                {"name": n, "content": m["content"], "mtime": m["mtime"], "size": m["size"]}
+                for n, m in sorted(self._mem.items())
+            ]
+            return {
+                "status": self.status,
+                "error": self.error,
+                "dir": MEMORIES_DIR,
+                "memories": mems,
+                "events": list(reversed(self._events)),  # newest first
+                "seq": self._seq,
+            }
+
+
+MEMORY_STORE = MemoryStore()
+
+
+class SkillStore:
+    """Snapshot of the agent's skill library (one SKILL.md per skill) plus a
+    change log, so the UI can show which skills the agent has and how they
+    evolve (added / patched / removed) over time.
+
+    Skill content is cached so we can (a) diff a skill when its SKILL.md
+    changes and (b) serve the current text on demand without another exec.
+    Polls only re-read the files that actually changed (by mtime/size)."""
+
+    def __init__(self, max_events: int = 300):
+        self._lock = threading.Lock()
+        self._skills: dict[str, dict] = {}  # id -> {content, mtime, size, name, category}
+        self._events: list[dict] = []
+        self._usage: dict = {}              # from .usage.json (per-skill metadata)
+        self._bundled: set[str] = set()     # skill names shipped in the base image
+        self._seq = 0
+        self._max = max_events
+        self._loaded = False
+        self._dirty = False
+        self.status = "connecting"          # connecting | live | error
+        self.error = ""
+
+    def _record(self, sid: str, ts: float, action: str, size: int,
+                diff: list[str] | None = None, add: int = 0, dele: int = 0) -> None:
+        self._seq += 1
+        self._events.append(
+            {"seq": self._seq, "id": sid, "ts": ts, "action": action, "size": size,
+             "diff": diff or [], "add": add, "del": dele}
+        )
+        if len(self._events) > self._max:
+            self._events = self._events[-self._max :]
+        self._dirty = True
+
+    def load(self, name: str) -> None:
+        """Restore a previously persisted feed so diffs survive a restart."""
+        data = _load_state(name)
+        if not data:
+            return
+        with self._lock:
+            self._seq = int(data.get("seq") or 0)
+            self._loaded = bool(data.get("loaded"))
+            self._events = data.get("events") or []
+            self._skills = data.get("skills") or {}
+
+    def maybe_save(self, name: str) -> None:
+        with self._lock:
+            if not self._dirty:
+                return
+            data = {"seq": self._seq, "loaded": self._loaded,
+                    "events": self._events, "skills": self._skills}
+            self._dirty = False
+        _save_state(name, data)
+
+    @staticmethod
+    def _meta(sid: str) -> tuple[str, str]:
+        parts = sid.split("/")
+        return parts[-1], "/".join(parts[:-1])
+
+    def set_meta(self, usage: dict, bundled: set[str]) -> None:
+        with self._lock:
+            self._usage = usage or {}
+            self._bundled = bundled or set()
+
+    def update(self, index: dict[str, dict], read_contents) -> None:
+        """``index`` is {id: {mtime, size}} for every SKILL.md. ``read_contents``
+        is called with the list of ids whose text we still need (first load, or
+        newly-changed skills) and returns {id: content}."""
+        with self._lock:
+            if not self._loaded:
+                contents = read_contents(list(index))
+                for sid, meta in index.items():
+                    name, cat = self._meta(sid)
+                    self._skills[sid] = {
+                        "content": contents.get(sid, ""), "mtime": meta["mtime"],
+                        "size": meta["size"], "name": name, "category": cat,
+                    }
+                self._loaded = True
+                return
+
+            changed = [
+                sid for sid, meta in index.items()
+                if sid not in self._skills
+                or meta["mtime"] != self._skills[sid]["mtime"]
+                or meta["size"] != self._skills[sid]["size"]
+            ]
+            contents = read_contents(changed) if changed else {}
+            now = time.time()
+            for sid in changed:
+                meta = index[sid]
+                new_c = contents.get(sid, "")
+                prev = self._skills.get(sid)
+                name, cat = self._meta(sid)
+                if prev is None:
+                    diff, add, dele = _diff("", new_c)
+                    self._record(sid, now, "added", meta["size"], diff, add, dele)
+                elif prev["content"] != new_c:
+                    diff, add, dele = _diff(prev["content"], new_c)
+                    self._record(sid, now, "patched", meta["size"], diff, add, dele)
+                self._skills[sid] = {
+                    "content": new_c, "mtime": meta["mtime"], "size": meta["size"],
+                    "name": name, "category": cat,
+                }
+            for sid in list(self._skills):
+                if sid not in index:
+                    diff, add, dele = _diff(self._skills[sid]["content"], "")
+                    self._record(sid, now, "removed", 0, diff, add, dele)
+                    del self._skills[sid]
+
+    def content_of(self, sid: str) -> str | None:
+        with self._lock:
+            s = self._skills.get(sid)
+            return s["content"] if s else None
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            skills = []
+            for sid, s in self._skills.items():
+                u = self._usage.get(s["name"]) or self._usage.get(sid) or {}
+                skills.append({
+                    "id": sid,
+                    "name": s["name"],
+                    "category": s["category"],
+                    "mtime": s["mtime"],
+                    "size": s["size"],
+                    "used": int(u.get("use_count") or 0),
+                    "patched": int(u.get("patch_count") or 0),
+                    "pinned": bool(u.get("pinned")),
+                    "state": u.get("state") or "active",
+                })
+            # Most-used first; then most-patched, most-recently-touched, name.
+            skills.sort(key=lambda x: (-x["used"], -x["patched"], -x["mtime"], x["name"]))
+            return {
+                "status": self.status,
+                "error": self.error,
+                "dir": SKILLS_DIR,
+                "count": len(skills),
+                "skills": skills,
+                "events": list(reversed(self._events)),  # newest first
+                "seq": self._seq,
+            }
+
+
+SKILL_STORE = SkillStore()
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +556,188 @@ def poll_loop() -> None:
         time.sleep(POLL_INTERVAL)
 
 
+_MEM_FILE = "<<<HD-MEMFILE>>>"
+_MEM_END = "<<<HD-MEMEND>>>"
+
+
+def read_memories() -> dict[str, dict]:
+    """Read the agent's markdown memory files out of the sandbox in one exec.
+
+    Returns {name: {"content": str, "mtime": int, "size": int}}. Lock files and
+    non-markdown files are ignored.
+    """
+    script = (
+        f'cd {MEMORIES_DIR} 2>/dev/null || exit 0; '
+        'for f in *.md; do [ -e "$f" ] || continue; '
+        f'printf "%s%s\\t%s\\t%s\\n" "{_MEM_FILE}" "$f" "$(stat -c %Y "$f")" "$(stat -c %s "$f")"; '
+        'cat "$f"; '
+        f'printf "\\n%s\\n" "{_MEM_END}"; done'
+    )
+    proc = _exec(["sh", "-c", script])
+    text = proc.stdout.decode("utf-8", "replace")
+    out: dict[str, dict] = {}
+    for chunk in text.split(_MEM_FILE):
+        if not chunk.strip("\n"):
+            continue
+        header, _, rest = chunk.partition("\n")
+        parts = header.split("\t")
+        if len(parts) != 3:
+            continue
+        name, mtime_s, size_s = parts
+        content = rest
+        idx = content.rfind(_MEM_END)
+        if idx != -1:
+            content = content[:idx]
+        content = content.rstrip("\n")
+        try:
+            mtime, size = int(mtime_s), int(size_s)
+        except ValueError:
+            mtime, size = 0, len(content.encode("utf-8"))
+        out[name] = {"content": content, "mtime": mtime, "size": size}
+    return out
+
+
+def memory_poll_loop() -> None:
+    """Background worker: read the agent's memory files and diff them over time."""
+    while True:
+        try:
+            MEMORY_STORE.update(read_memories())
+            MEMORY_STORE.status = "live"
+            MEMORY_STORE.error = ""
+        except subprocess.TimeoutExpired:
+            MEMORY_STORE.status = "error"
+            MEMORY_STORE.error = "sandbox exec timed out"
+        except Exception as exc:  # noqa: BLE001 - surface any failure to UI
+            MEMORY_STORE.status = "error"
+            MEMORY_STORE.error = f"{type(exc).__name__}: {exc}"
+        MEMORY_STORE.maybe_save("memory_feed.json")
+        time.sleep(MEMORY_POLL_INTERVAL)
+
+
+_SKILL_FILE = "<<<HD-SKILLFILE>>>"
+_SKILL_END = "<<<HD-SKILLEND>>>"
+_SKILL_SPLIT = "<<<HD-SKILLMETA>>>"
+
+
+def read_skill_index() -> dict[str, dict]:
+    """Cheaply list every skill (its SKILL.md) with mtime + size, in one exec.
+
+    Returns {id: {"mtime": int, "size": int}} where id is the skill dir relative
+    to the skills root, e.g. ``apple/apple-notes`` or ``summarize-patient-chart``.
+    """
+    proc = _exec([
+        "sh", "-c",
+        f'cd {SKILLS_DIR} 2>/dev/null || exit 0; '
+        r'find . -name SKILL.md -printf "%P\t%T@\t%s\n" 2>/dev/null',
+    ])
+    out: dict[str, dict] = {}
+    for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        rel, mtime_s, size_s = parts
+        suffix = "/SKILL.md"
+        sid = rel[: -len(suffix)] if rel.endswith(suffix) else rel
+        if not sid:
+            continue
+        try:
+            mtime, size = int(float(mtime_s)), int(size_s)
+        except ValueError:
+            continue
+        out[sid] = {"mtime": mtime, "size": size}
+    return out
+
+
+def read_skill_contents(ids: list[str]) -> dict[str, str]:
+    """Read the SKILL.md text for the given skill ids in a single exec. Ids are
+    shell-quoted and embedded in the script (nemoclaw exec doesn't forward extra
+    argv past ``sh -c``)."""
+    if not ids:
+        return {}
+    quoted = " ".join(shlex.quote(i) for i in ids)
+    script = (
+        f'cd {SKILLS_DIR} 2>/dev/null || exit 0; '
+        f'for id in {quoted}; do f="$id/SKILL.md"; [ -f "$f" ] || continue; '
+        f'printf "%s%s\\n" "{_SKILL_FILE}" "$id"; cat "$f"; '
+        f'printf "\\n%s\\n" "{_SKILL_END}"; done'
+    )
+    proc = _exec(["sh", "-c", script])
+    text = proc.stdout.decode("utf-8", "replace")
+    out: dict[str, str] = {}
+    for chunk in text.split(_SKILL_FILE):
+        if not chunk.strip("\n"):
+            continue
+        header, _, rest = chunk.partition("\n")
+        sid = header.strip()
+        if not sid:
+            continue
+        idx = rest.rfind(_SKILL_END)
+        if idx != -1:
+            rest = rest[:idx]
+        out[sid] = rest.rstrip("\n")
+    return out
+
+
+def read_skill_meta() -> tuple[dict, set[str]]:
+    """Read .usage.json (per-skill use/patch counts) and .bundled_manifest
+    (names shipped in the base image) in one exec."""
+    proc = _exec([
+        "sh", "-c",
+        f'cat {SKILLS_DIR}/.usage.json 2>/dev/null; '
+        f'printf "\\n{_SKILL_SPLIT}\\n"; '
+        f'cat {SKILLS_DIR}/.bundled_manifest 2>/dev/null',
+    ])
+    text = proc.stdout.decode("utf-8", "replace")
+    usage_txt, _, bundled_txt = text.partition(_SKILL_SPLIT)
+    try:
+        usage = json.loads(usage_txt) if usage_txt.strip() else {}
+    except json.JSONDecodeError:
+        usage = {}
+    bundled: set[str] = set()
+    for line in bundled_txt.splitlines():
+        name = line.split(":", 1)[0].strip()
+        if name:
+            bundled.add(name)
+    return usage, bundled
+
+
+def select_tracked_skills(index: dict[str, dict], bundled: set[str]) -> dict[str, dict]:
+    """Pick which skills the dashboard tracks: the configured ``CUSTOM_SKILLS``
+    allowlist (matched by dir id or leaf name), or — if none configured — every
+    skill not shipped in the base image."""
+    out: dict[str, dict] = {}
+    for sid, meta in index.items():
+        name = sid.split("/")[-1]
+        if CUSTOM_SKILLS:
+            keep = sid in CUSTOM_SKILLS or name in CUSTOM_SKILLS
+        else:
+            keep = name not in bundled and sid not in bundled
+        if keep:
+            out[sid] = meta
+    return out
+
+
+def skill_poll_loop() -> None:
+    """Background worker: track the agent's custom skills and diff SKILL.md
+    files as they evolve."""
+    while True:
+        try:
+            usage, bundled = read_skill_meta()
+            SKILL_STORE.set_meta(usage, bundled)
+            tracked = select_tracked_skills(read_skill_index(), bundled)
+            SKILL_STORE.update(tracked, read_skill_contents)
+            SKILL_STORE.status = "live"
+            SKILL_STORE.error = ""
+        except subprocess.TimeoutExpired:
+            SKILL_STORE.status = "error"
+            SKILL_STORE.error = "sandbox exec timed out"
+        except Exception as exc:  # noqa: BLE001 - surface any failure to UI
+            SKILL_STORE.status = "error"
+            SKILL_STORE.error = f"{type(exc).__name__}: {exc}"
+        SKILL_STORE.maybe_save("skill_feed.json")
+        time.sleep(SKILL_POLL_INTERVAL)
+
+
 # ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
@@ -275,6 +764,21 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/hermes":
             html = HERMES_HTML.replace("__HERMES_DASHBOARD_PORT__", str(HERMES_DASHBOARD_PORT))
             self._send(200, html.encode(), "text/html; charset=utf-8")
+        elif parsed.path == "/dashboard":
+            self._send(200, DASHBOARD_HTML.encode(), "text/html; charset=utf-8")
+        elif parsed.path == "/api/memories":
+            self._send(200, json.dumps(MEMORY_STORE.snapshot()).encode(), "application/json")
+        elif parsed.path == "/api/skills":
+            self._send(200, json.dumps(SKILL_STORE.snapshot()).encode(), "application/json")
+        elif parsed.path == "/api/skill":
+            qs = parse_qs(parsed.query)
+            sid = qs.get("id", [""])[0]
+            content = SKILL_STORE.content_of(sid)
+            if content is None:
+                self._send(404, b'{"error":"unknown skill"}', "application/json")
+            else:
+                body = json.dumps({"id": sid, "content": content}).encode()
+                self._send(200, body, "application/json")
         elif parsed.path == "/api/events":
             qs = parse_qs(parsed.query)
             since = int(qs.get("since", ["0"])[0])
@@ -439,6 +943,7 @@ SHELL_HTML = r"""<!DOCTYPE html>
     <div class="tab" data-view="traces">traces</div>
     <div class="tab" data-view="chat">chat</div>
     <div class="tab" data-view="hermes">hermes</div>
+    <div class="tab" data-view="dashboard">dashboard</div>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
@@ -449,9 +954,10 @@ SHELL_HTML = r"""<!DOCTYPE html>
         allow="clipboard-read; clipboard-write; microphone"></iframe></div>
   <div class="view" data-view="hermes"><iframe data-src="/hermes?embed=1" title="Hermes Dashboard"
         allow="clipboard-read; clipboard-write; microphone"></iframe></div>
+  <div class="view" data-view="dashboard"><iframe data-src="/dashboard?embed=1" title="Dashboard"></iframe></div>
 </div>
 <script>
-const TABS = ['traces', 'chat', 'hermes'];
+const TABS = ['traces', 'chat', 'hermes', 'dashboard'];
 
 // Keep-alive routing: every view stays mounted once loaded, we only toggle
 // visibility, so each iframe preserves its own state (chat history/stream,
@@ -699,6 +1205,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
     <a class="chip navlink active" href="/">traces</a>
     <a class="chip navlink" href="/chat">chat</a>
     <a class="chip navlink" href="/hermes">hermes</a>
+    <a class="chip navlink" href="/dashboard">dashboard</a>
   </nav>
   <span class="pill"><span class="dot" id="statusDot"></span><span id="statusText">connecting</span></span>
   <span class="pill" id="countPill">0 events</span>
@@ -1371,12 +1878,21 @@ CHAT_HTML = r"""<!DOCTYPE html>
   /* markdown */
   .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
   .md p { margin: 7px 0; } .md ul, .md ol { margin: 7px 0; padding-left: 22px; } .md li { margin: 3px 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 13px 0 6px; line-height: 1.25; font-weight: 700; color: var(--text); }
+  .md h1 { font-size: 19px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15px; }
+  .md h4, .md h5, .md h6 { font-size: 13px; } .md h1, .md h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
   .md strong { color: var(--text); font-weight: 700; }
   .md code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
              font: 12px/1.4 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
   .md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
              margin: 8px 0; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--code-fg);
              font: 12px/1.5 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
+  .md table.md-table { border-collapse: collapse; margin: 8px 0; display: block; width: max-content;
+             max-width: 100%; overflow-x: auto; font-size: 13px; }
+  .md table.md-table th, .md table.md-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left;
+             vertical-align: top; }
+  .md table.md-table th { background: var(--panel2); color: var(--text); font-weight: 700; }
+  .md table.md-table tr:nth-child(even) td { background: rgba(127,127,127,.06); }
 
   .composer { width: 100%; max-width: 820px; padding: 10px 18px 18px; }
   .inputbar { display: flex; gap: 10px; align-items: flex-end; background: var(--panel); border: 1px solid var(--border);
@@ -1404,6 +1920,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
     <a class="chip navlink" href="/">traces</a>
     <a class="chip navlink active" href="/chat">chat</a>
     <a class="chip navlink" href="/hermes">hermes</a>
+    <a class="chip navlink" href="/dashboard">dashboard</a>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="newChat">new chat</button>
@@ -1447,13 +1964,38 @@ function mdLite(text) {
   let html = '', inUl = false, inOl = false, inCode = false, code = '';
   const closeLists = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
   const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  for (const raw of lines) {
+  // GitHub-style pipe tables
+  const isSep = s => /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(s) && s.includes('-');
+  const isRow = s => s.includes('|') && s.trim() !== '';
+  const cells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     if (/^\s*```/.test(raw)) {
       if (inCode) { html += '<pre class="md-code">' + code.replace(/\n$/, '') + '</pre>'; inCode = false; code = ''; }
       else { closeLists(); inCode = true; code = ''; }
       continue;
     }
     if (inCode) { code += raw + '\n'; continue; }
+    // A header row followed by a |---|---| delimiter starts a table.
+    if (isRow(raw) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      closeLists();
+      const align = cells(lines[i + 1]).map(c => {
+        const l = c.startsWith(':'), r = c.endsWith(':');
+        return (l && r) ? 'center' : r ? 'right' : l ? 'left' : '';
+      });
+      const cell = (c, k, tag) =>
+        '<' + tag + (align[k] ? ' style="text-align:' + align[k] + '"' : '') + '>' + inline(c) + '</' + tag + '>';
+      const th = cells(raw).map((c, k) => cell(c, k, 'th')).join('');
+      let body = '', j = i + 2;
+      for (; j < lines.length && isRow(lines[j]) && !isSep(lines[j]); j++) {
+        body += '<tr>' + cells(lines[j]).map((c, k) => cell(c, k, 'td')).join('') + '</tr>';
+      }
+      html += '<table class="md-table"><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody></table>';
+      i = j - 1;
+      continue;
+    }
+    const hd = raw.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (hd) { closeLists(); const lv = hd[1].length; html += '<h' + lv + '>' + inline(hd[2].replace(/\s+#+\s*$/, '')) + '</h' + lv + '>'; continue; }
     const ol = raw.match(/^\s*\d+\.\s+(.*)/), ul = raw.match(/^\s*[-*]\s+(.*)/);
     if (ol) { if (!inOl) { closeLists(); html += '<ol>'; inOl = true; } html += '<li>' + inline(ol[1]) + '</li>'; continue; }
     if (ul) { if (!inUl) { closeLists(); html += '<ul>'; inUl = true; } html += '<li>' + inline(ul[1]) + '</li>'; continue; }
@@ -1669,6 +2211,7 @@ HERMES_HTML = r"""<!DOCTYPE html>
     <a class="chip navlink" href="/">traces</a>
     <a class="chip navlink" href="/chat">chat</a>
     <a class="chip navlink active" href="/hermes">hermes</a>
+    <a class="chip navlink" href="/dashboard">dashboard</a>
   </nav>
   <div class="spacer"></div>
   <a class="chip" id="openTab" href="#" target="_blank" rel="noopener">open in new tab ↗</a>
@@ -1733,13 +2276,402 @@ window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme
 """
 
 
+DASHBOARD_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard</title>
+<script>if(new URLSearchParams(location.search).has('embed'))document.documentElement.classList.add('embed');</script>
+<style>html.embed header .nav,html.embed header #themeToggle{display:none!important}</style>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131722; --panel2: #1a2030; --border: #232a3b;
+    --text: #d7dce5; --muted: #8b93a7; --accent: #7c5cff; --err: #ff5c72;
+    --header-a: #111623; --header-b: #0b0e14;
+  }
+  body.light {
+    --bg: #f5f7fa; --panel: #ffffff; --panel2: #eef1f6; --border: #d9dee8;
+    --text: #1b2330; --muted: #5b647a; --accent: #6b46ff; --err: #d92d3f;
+    --header-a: #ffffff; --header-b: #eef1f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
+  header { flex: none; background: linear-gradient(180deg,var(--header-a),var(--header-b));
+           border-bottom: 1px solid var(--border); padding: 12px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+  .spacer { flex: 1; }
+  .nav { display: flex; gap: 4px; }
+  .chip { cursor: pointer; user-select: none; padding: 4px 10px; border-radius: 6px; font-size: 12px;
+          border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
+  .chip:hover { color: var(--text); }
+  a.chip { text-decoration: none; display: inline-flex; align-items: center; }
+  .navlink.active { background: var(--accent); color: #fff; border-color: transparent; }
+  main { flex: 1; min-height: 0; overflow: auto; padding: 22px 20px; }
+  .dash-wrap { max-width: 1120px; margin: 0 auto; }
+  .dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  .dash-title { font-size: 18px; font-weight: 700; letter-spacing: .2px; }
+  .dash-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .dash-status { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .dash-status .sdot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dash-status .sdot.live { background: #2ec07a; box-shadow: 0 0 8px #2ec07a; }
+  .dash-status .sdot.error { background: var(--err); }
+  .dash-cols { display: grid; grid-template-columns: 1fr 330px; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .dash-cols { grid-template-columns: 1fr; } }
+  .col-h { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
+           margin: 0 2px 10px; display: flex; align-items: center; gap: 8px; }
+  .pill { background: var(--panel2); border: 1px solid var(--border); border-radius: 20px; padding: 1px 8px; font-size: 11px; color: var(--text); }
+  .mem-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .mem-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .mem-card .mc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                       padding: 9px 13px; border-bottom: 1px solid var(--border); background: var(--panel2); }
+  .mem-card .mc-name { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .mem-card .mc-name .ic { color: var(--accent); }
+  .mem-card .mc-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .mem-card .mc-body { padding: 4px 14px 8px; }
+  .mem-item { padding: 9px 0; border-top: 1px dashed var(--border); }
+  .mem-item:first-child { border-top: 0; }
+  .mem-item.i-empty { color: var(--muted); font-style: italic; }
+  .mem-card.changed { animation: mpulse 1.8s ease; }
+  @keyframes mpulse { 0% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 2px transparent; } }
+  .act-feed { display: flex; flex-direction: column; gap: 3px; }
+  .act-row { display: flex; flex-direction: column; border-radius: 8px; border: 1px solid transparent; }
+  .act-row:hover, .act-row.open { background: var(--panel); border-color: var(--border); }
+  .act-top { display: flex; gap: 10px; align-items: center; padding: 8px 10px; }
+  .act-row.has-diff .act-top { cursor: pointer; }
+  .act-row .a-ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+                   font-size: 12px; flex: none; background: var(--panel2); border: 1px solid var(--border); }
+  .act-row .a-main { flex: 1; min-width: 0; }
+  .act-row .a-name { font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act-row .a-meta { color: var(--muted); font-size: 11px; }
+  .a-delta { font-size: 11px; white-space: nowrap; font-family: "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
+  .a-delta .add { color: #2ec07a; } .a-delta .del { color: var(--err); }
+  .a-caret { color: var(--muted); font-size: 10px; width: 10px; text-align: center; transition: transform .15s ease; }
+  .act-row.open .a-caret { transform: rotate(90deg); }
+  .a-diff { margin: 0; padding: 6px 10px 10px 42px; border-top: 1px solid var(--border);
+            font-family: "SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size: 11.5px; line-height: 1.55; overflow-x: auto; }
+  .a-diff .dl { display: block; white-space: pre-wrap; word-break: break-word; }
+  .a-diff .dl.add { color: #2ec07a; } .a-diff .dl.del { color: var(--err); }
+  .a-diff .dl.hunk { color: var(--accent); } .a-diff .dl.ctx { color: var(--muted); opacity: .85; }
+  .act-row.added .a-ic { color: #2ec07a; } .act-row.updated .a-ic { color: var(--accent); }
+  .act-row.removed .a-ic { color: var(--err); } .act-row.recorded .a-ic { color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; border: 1px dashed var(--border); border-radius: 12px; padding: 40px 18px; }
+  .md :first-child { margin-top: 0; } .md :last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3, .md h4 { font-size: 13.5px; margin: 10px 0 4px; }
+  .md p { margin: 6px 0; } .md ul, .md ol { margin: 6px 0; padding-left: 20px; }
+  .md li { margin: 2px 0; }
+  .md code { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+             font-family: "SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size: 12px; }
+  .md strong { color: var(--text); font-weight: 700; }
+  /* skills */
+  .dash-sep { height: 1px; background: var(--border); border: 0; margin: 28px 0 22px; }
+  .sk-list { display: flex; flex-direction: column; gap: 6px; }
+  .sk-row { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  .sk-row.open { border-color: var(--accent); }
+  .sk-top { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; }
+  .sk-caret { color: var(--muted); font-size: 10px; width: 10px; text-align: center; transition: transform .15s ease; flex: none; }
+  .sk-row.open .sk-caret { transform: rotate(90deg); }
+  .sk-main { flex: 1; min-width: 0; }
+  .sk-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sk-cat { color: var(--muted); font-size: 11px; font-weight: 500; background: var(--panel2);
+            border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; }
+  .sk-meta { margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sk-upd { color: var(--muted); font-size: 11px; }
+  .sk-badge { font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+              border-radius: 5px; padding: 1px 6px; border: 1px solid var(--border); color: var(--muted); }
+  .sk-badge.custom { color: var(--accent); border-color: var(--accent); }
+  .sk-badge.patched { color: #e0a800; border-color: #e0a800; }
+  .sk-badge.used { color: #2ec07a; border-color: #2ec07a; }
+  .sk-body { padding: 4px 14px 12px 32px; border-top: 1px solid var(--border); max-height: 380px; overflow: auto; }
+  .sk-loading { color: var(--muted); padding: 10px 0; font-style: italic; }
+  .act-row.patched .a-ic { color: var(--accent); } .act-row.added .a-ic { color: #2ec07a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Dashboard</h1>
+  <nav class="nav">
+    <a class="chip navlink" href="/">traces</a>
+    <a class="chip navlink" href="/chat">chat</a>
+    <a class="chip navlink" href="/hermes">hermes</a>
+    <a class="chip navlink active" href="/dashboard">dashboard</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
+</header>
+<main>
+  <div class="dash-wrap">
+    <div class="dash-head">
+      <div>
+        <div class="dash-title">Agent memory</div>
+        <div class="dash-sub">what the agent remembers, and what it has learned over time</div>
+      </div>
+      <div class="dash-status"><span class="sdot" id="memDot"></span><span id="memStat">connecting…</span></div>
+    </div>
+    <div class="dash-cols">
+      <section>
+        <div class="col-h">Memories <span class="pill" id="memCount">0</span></div>
+        <div id="memGrid" class="mem-grid"><div class="empty">Loading…</div></div>
+      </section>
+      <aside>
+        <div class="col-h">Learning activity</div>
+        <div id="actFeed" class="act-feed"><div class="empty">Loading…</div></div>
+      </aside>
+    </div>
+
+    <hr class="dash-sep" />
+
+    <div class="dash-head">
+      <div>
+        <div class="dash-title">Agent Custom Skills</div>
+        <div class="dash-sub">the skills configured for this agent, ordered by usage — and how each one evolves over time</div>
+      </div>
+      <div class="dash-status"><span class="sdot" id="skDot"></span><span id="skStat">connecting…</span></div>
+    </div>
+    <div class="dash-cols">
+      <section>
+        <div class="col-h">Skills <span class="pill" id="skCount">0</span></div>
+        <div id="skList" class="sk-list"><div class="empty">Loading…</div></div>
+      </section>
+      <aside>
+        <div class="col-h">Skill evolution</div>
+        <div id="skFeed" class="act-feed"><div class="empty">Loading…</div></div>
+      </aside>
+    </div>
+  </div>
+</main>
+<script>
+const themeBtn = document.getElementById('themeToggle');
+function applyTheme(t) {
+  document.body.classList.toggle('light', t === 'light');
+  themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
+}
+let theme = 'dark';
+try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+applyTheme(theme);
+themeBtn.addEventListener('click', () => {
+  theme = document.body.classList.contains('light') ? 'dark' : 'light';
+  try { localStorage.setItem('atof-theme', theme); } catch (e) {}
+  applyTheme(theme);
+});
+window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+
+// ---- Agent memory ----
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function mdLite(text){
+  const lines = esc(text).split(/\r?\n/);
+  let html = '', inUl = false, inOl = false;
+  const closeL = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
+  const inl = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  for (const raw of lines) {
+    const h = raw.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (h) { closeL(); const lv = Math.min(h[1].length, 4); html += '<h' + lv + '>' + inl(h[2]) + '</h' + lv + '>'; continue; }
+    const ol = raw.match(/^\s*\d+\.\s+(.*)/), ul = raw.match(/^\s*[-*]\s+(.*)/);
+    if (ol) { if (!inOl) { closeL(); html += '<ol>'; inOl = true; } html += '<li>' + inl(ol[1]) + '</li>'; continue; }
+    if (ul) { if (!inUl) { closeL(); html += '<ul>'; inUl = true; } html += '<li>' + inl(ul[1]) + '</li>'; continue; }
+    closeL(); if (raw.trim() !== '') html += '<p>' + inl(raw) + '</p>';
+  }
+  closeL(); return html;
+}
+function relTime(ts){
+  const s = Math.max(0, Date.now()/1000 - ts);
+  if (s < 45) return 'just now';
+  if (s < 5400) return Math.max(1, Math.round(s/60)) + 'm ago';
+  if (s < 86400) return Math.round(s/3600) + 'h ago';
+  return Math.round(s/86400) + 'd ago';
+}
+const memGrid = document.getElementById('memGrid'), actFeed = document.getElementById('actFeed');
+const memCount = document.getElementById('memCount'), memDot = document.getElementById('memDot'), memStat = document.getElementById('memStat');
+const skList = document.getElementById('skList'), skFeed = document.getElementById('skFeed');
+const skCount = document.getElementById('skCount'), skDot = document.getElementById('skDot'), skStat = document.getElementById('skStat');
+const prevContent = {};
+const memOpen = new Set();   // memory event seqs whose diff is expanded (kept across polls)
+const skOpen = new Set();    // skill-evolution event seqs whose diff is expanded
+
+function diffHtml(diff){
+  return diff.map(ln => {
+    const c = ln.charAt(0);
+    const cls = c === '+' ? 'add' : c === '-' ? 'del' : c === '@' ? 'hunk' : 'ctx';
+    return '<span class="dl ' + cls + '">' + esc(ln) + '</span>';
+  }).join('');
+}
+function setStatus(dot, stat, d){
+  dot.className = 'sdot ' + (d.status === 'live' ? 'live' : (d.status === 'error' ? 'error' : ''));
+  stat.textContent = d.status === 'error' ? ('error: ' + (d.error || '')) : (d.status === 'live' ? 'live' : 'connecting…');
+}
+
+// Shared git-style activity feed, used by both memory learning and skill evolution.
+function renderFeed(container, events, openSet, cfg){
+  if (!events.length) { container.innerHTML = '<div class="empty">' + cfg.empty + '</div>'; return; }
+  container.innerHTML = '';
+  for (const e of events) {
+    const hasDiff = !!(e.diff && e.diff.length);
+    const open = openSet.has(e.seq);
+    const row = document.createElement('div');
+    row.className = 'act-row ' + e.action + (hasDiff ? ' has-diff' : '') + (open ? ' open' : '');
+    const delta = (e.add || e.del)
+      ? '<span class="a-delta">' + (e.add ? '<span class="add">+' + e.add + '</span> ' : '') +
+        (e.del ? '<span class="del">\u2212' + e.del + '</span>' : '') + '</span>'
+      : '';
+    const caret = hasDiff ? '<span class="a-caret">\u25B8</span>' : '';
+    row.innerHTML =
+      '<div class="act-top">' +
+        '<div class="a-ic">' + (cfg.icon[e.action] || '•') + '</div>' +
+        '<div class="a-main"><div class="a-name">' + esc(cfg.nameOf(e)) + '</div>' +
+        '<div class="a-meta">' + (cfg.verb[e.action] || e.action) + ' · ' + relTime(e.ts) + '</div></div>' +
+        delta + caret +
+      '</div>' +
+      (hasDiff ? '<div class="a-diff"' + (open ? '' : ' hidden') + '>' + diffHtml(e.diff) + '</div>' : '');
+    if (hasDiff) {
+      row.querySelector('.act-top').addEventListener('click', () => {
+        const nowOpen = !openSet.has(e.seq);
+        if (nowOpen) openSet.add(e.seq); else openSet.delete(e.seq);
+        row.classList.toggle('open', nowOpen);
+        const dd = row.querySelector('.a-diff');
+        if (dd) dd.hidden = !nowOpen;
+      });
+    }
+    container.appendChild(row);
+  }
+}
+const MEM_CFG = {
+  icon: { added: '+', updated: '✎', removed: '−', recorded: '•' },
+  verb: { added: 'learned', updated: 'updated', removed: 'forgot', recorded: 'recorded' },
+  empty: 'No activity yet.',
+  nameOf: e => e.name.replace(/\.md$/, ''),
+};
+const SK_CFG = {
+  icon: { added: '+', patched: '✎', removed: '−' },
+  verb: { added: 'added', patched: 'patched', removed: 'removed' },
+  empty: 'No skill changes yet — when a skill is added or patched, the diff shows up here.',
+  nameOf: e => e.id,
+};
+
+// ---- Agent memory ----
+async function pollMem(){
+  let d;
+  try { const r = await fetch('/api/memories', { cache: 'no-store' }); d = await r.json(); }
+  catch (e) { memDot.className = 'sdot error'; memStat.textContent = 'disconnected'; return; }
+  setStatus(memDot, memStat, d);
+
+  // Hermes stores multiple memory entries per file, separated by a line of "§".
+  const splitEntries = c => (c || '').split(/^\s*§\s*$/m).map(s => s.trim()).filter(Boolean);
+
+  const mems = d.memories || [];
+  const totalEntries = mems.reduce((n, m) => n + splitEntries(m.content).length, 0);
+  memCount.textContent = totalEntries;
+  if (!mems.length) {
+    memGrid.innerHTML = '<div class="empty">No memories yet — the agent hasn\'t written anything to remember.</div>';
+  } else {
+    memGrid.innerHTML = '';
+    for (const m of mems) {
+      const changed = prevContent[m.name] !== undefined && prevContent[m.name] !== m.content;
+      const title = m.name.replace(/\.md$/, '');
+      const entries = splitEntries(m.content);
+      const body = entries.length
+        ? entries.map(e => '<div class="mem-item"><div class="md">' + mdLite(e) + '</div></div>').join('')
+        : '<div class="mem-item i-empty">empty</div>';
+      const card = document.createElement('div');
+      card.className = 'mem-card' + (changed ? ' changed' : '');
+      card.innerHTML =
+        '<div class="mc-head"><div class="mc-name"><span class="ic">▤</span>' + esc(title) + '</div>' +
+        '<div class="mc-time" title="' + esc(m.name) + '">' + entries.length + ' ' +
+        (entries.length === 1 ? 'entry' : 'entries') + ' · updated ' + relTime(m.mtime) + '</div></div>' +
+        '<div class="mc-body">' + body + '</div>';
+      memGrid.appendChild(card);
+      prevContent[m.name] = m.content;
+    }
+    const names = new Set(mems.map(m => m.name));
+    Object.keys(prevContent).forEach(k => { if (!names.has(k)) delete prevContent[k]; });
+  }
+  renderFeed(actFeed, d.events || [], memOpen, MEM_CFG);
+}
+
+// ---- Agent skills ----
+const skContentCache = {};    // id -> SKILL.md text (fetched lazily on expand)
+const skBodyOpen = new Set(); // skill ids whose SKILL.md is expanded
+async function fetchSkill(id){
+  if (skContentCache[id] !== undefined) return skContentCache[id];
+  try {
+    const r = await fetch('/api/skill?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    const j = await r.json();
+    skContentCache[id] = (j && typeof j.content === 'string') ? j.content : null;
+  } catch (e) { skContentCache[id] = null; }
+  return skContentCache[id];
+}
+async function renderSkillBody(bodyEl, id){
+  bodyEl.innerHTML = '<div class="sk-loading">Loading…</div>';
+  const c = await fetchSkill(id);
+  bodyEl.innerHTML = c === null ? '<div class="sk-loading">Failed to load SKILL.md.</div>'
+                                : '<div class="md">' + mdLite(c) + '</div>';
+}
+function skBadges(s){
+  let b = '';
+  if (s.patched) b += '<span class="sk-badge patched">patched ' + s.patched + '\u00d7</span>';
+  b += '<span class="sk-badge used">used ' + (s.used || 0) + '\u00d7</span>';
+  return b;
+}
+async function pollSkills(){
+  let d;
+  try { const r = await fetch('/api/skills', { cache: 'no-store' }); d = await r.json(); }
+  catch (e) { skDot.className = 'sdot error'; skStat.textContent = 'disconnected'; return; }
+  setStatus(skDot, skStat, d);
+
+  const list = d.skills || [];
+  skCount.textContent = list.length;
+
+  if (!list.length) {
+    skList.innerHTML = '<div class="empty">No custom skills found — set HERMES_CUSTOM_SKILLS in docker-compose to the skills you care about.</div>';
+  } else {
+    skList.innerHTML = '';
+    for (const s of list) {
+      const open = skBodyOpen.has(s.id);
+      const cat = s.category ? '<span class="sk-cat">' + esc(s.category) + '</span>' : '';
+      const row = document.createElement('div');
+      row.className = 'sk-row' + (open ? ' open' : '');
+      row.innerHTML =
+        '<div class="sk-top">' +
+          '<span class="sk-caret">\u25B8</span>' +
+          '<div class="sk-main"><div class="sk-name">' + esc(s.name) + cat + '</div>' +
+          '<div class="sk-meta">' + skBadges(s) + '<span class="sk-upd">updated ' + relTime(s.mtime) + '</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="sk-body"' + (open ? '' : ' hidden') + '></div>';
+      const bodyEl = row.querySelector('.sk-body');
+      if (open) renderSkillBody(bodyEl, s.id);
+      row.querySelector('.sk-top').addEventListener('click', () => {
+        const nowOpen = !skBodyOpen.has(s.id);
+        if (nowOpen) skBodyOpen.add(s.id); else skBodyOpen.delete(s.id);
+        row.classList.toggle('open', nowOpen);
+        bodyEl.hidden = !nowOpen;
+        if (nowOpen) renderSkillBody(bodyEl, s.id);
+      });
+      skList.appendChild(row);
+    }
+  }
+  renderFeed(skFeed, d.events || [], skOpen, SK_CFG);
+}
+
+async function tick(){
+  await Promise.allSettled([pollMem(), pollSkills()]);
+  setTimeout(tick, 3500);
+}
+tick();
+</script>
+</body>
+</html>
+"""
+
+
 def _env(name: str, default: str) -> str:
     val = os.environ.get(name)
     return val if val not in (None, "") else default
 
 
 def main() -> None:
-    global SANDBOX, ATOF_DIR, POLL_INTERVAL, HERMES_API_HOST, HERMES_API_PORT, HERMES_DASHBOARD_PORT
+    global SANDBOX, ATOF_DIR, MEMORIES_DIR, SKILLS_DIR, CUSTOM_SKILLS, STATE_DIR, POLL_INTERVAL, HERMES_API_HOST, HERMES_API_PORT, HERMES_DASHBOARD_PORT
     # Env vars provide the defaults (convenient for docker-compose); explicit
     # CLI flags still win over them.
     parser = argparse.ArgumentParser(description="Live ATOF trace dashboard + Hermes chat")
@@ -1747,6 +2679,17 @@ def main() -> None:
                         help="nemoclaw sandbox name [env ATOF_SANDBOX]")
     parser.add_argument("--dir", default=_env("ATOF_DIR", ATOF_DIR),
                         help="atof directory inside the sandbox [env ATOF_DIR]")
+    parser.add_argument("--memories-dir", default=_env("HERMES_MEMORIES_DIR", MEMORIES_DIR),
+                        help="agent memory directory inside the sandbox [env HERMES_MEMORIES_DIR]")
+    parser.add_argument("--skills-dir", default=_env("HERMES_SKILLS_DIR", SKILLS_DIR),
+                        help="agent skills directory inside the sandbox [env HERMES_SKILLS_DIR]")
+    parser.add_argument("--custom-skills", default=_env("HERMES_CUSTOM_SKILLS", ""),
+                        help="comma/space-separated skills to show under 'Agent Custom Skills' "
+                             "(dir id or leaf name under the skills root); empty keeps the built-in "
+                             "default set [env HERMES_CUSTOM_SKILLS]")
+    parser.add_argument("--state-dir", default=_env("DASHBOARD_STATE_DIR", ""),
+                        help="directory to persist the memory/skill activity feeds so they "
+                             "survive a restart; empty disables it [env DASHBOARD_STATE_DIR]")
     parser.add_argument("--port", type=int, default=int(_env("ATOF_PORT", "8090")),
                         help="HTTP port [env ATOF_PORT]")
     parser.add_argument("--host", default=_env("ATOF_HOST", "127.0.0.1"),
@@ -1764,13 +2707,24 @@ def main() -> None:
 
     SANDBOX = args.sandbox
     ATOF_DIR = args.dir.rstrip("/")
+    MEMORIES_DIR = args.memories_dir.rstrip("/")
+    SKILLS_DIR = args.skills_dir.rstrip("/")
+    _custom = args.custom_skills.replace(",", " ").split()
+    if _custom:
+        CUSTOM_SKILLS = set(_custom)
+    STATE_DIR = args.state_dir.rstrip("/")
     POLL_INTERVAL = args.interval
     HERMES_API_HOST = args.hermes_api_host
     HERMES_API_PORT = args.hermes_api_port
     HERMES_DASHBOARD_PORT = args.hermes_dashboard_port
 
     token = get_gateway_token()
+    if STATE_DIR:
+        MEMORY_STORE.load("memory_feed.json")
+        SKILL_STORE.load("skill_feed.json")
     threading.Thread(target=poll_loop, daemon=True).start()
+    threading.Thread(target=memory_poll_loop, daemon=True).start()
+    threading.Thread(target=skill_poll_loop, daemon=True).start()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}"
@@ -1779,6 +2733,8 @@ def main() -> None:
     print(f"  -> chat:   {url}/chat  (agent '{HERMES_MODEL}' via port {HERMES_API_PORT}, "
           f"token {'ok' if token else 'MISSING'})")
     print(f"  -> hermes: {url}/hermes  (embeds native dashboard on port {HERMES_DASHBOARD_PORT})")
+    print(f"  -> dashboard: {url}/dashboard")
+    print(f"  -> feeds persisted to: {STATE_DIR}" if STATE_DIR else "  -> feeds in-memory only (set DASHBOARD_STATE_DIR to persist)")
     print("  (Ctrl-C to stop)")
     try:
         server.serve_forever()

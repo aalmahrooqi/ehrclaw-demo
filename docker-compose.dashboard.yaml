@@ -16,6 +16,14 @@ services:
       # Dashboard
       ATOF_SANDBOX: ${ATOF_SANDBOX:-hermes-health}
       ATOF_DIR: ${ATOF_DIR:-/sandbox/.nemo-relay/atof}
+      HERMES_MEMORIES_DIR: ${HERMES_MEMORIES_DIR:-/sandbox/.hermes/memories}
+      HERMES_SKILLS_DIR: ${HERMES_SKILLS_DIR:-/sandbox/.hermes/skills}
+      # Only these skills appear under "Agent Custom Skills" (comma/space
+      # separated; match by skill dir id or leaf name under HERMES_SKILLS_DIR).
+      HERMES_CUSTOM_SKILLS: ${HERMES_CUSTOM_SKILLS:-summarize-patient-chart,fhir-data-access,fhir-prescribe,clinical-trial-cohort-prescreener,drug-interaction-labels-check,rxnorm-resolve-cui}
+      # Persist the learning-activity / skill-evolution feeds so they survive a
+      # restart (stored in the named volume below).
+      DASHBOARD_STATE_DIR: ${DASHBOARD_STATE_DIR:-/app/state}
       ATOF_HOST: ${ATOF_HOST:-127.0.0.1}
       ATOF_PORT: ${ATOF_PORT:-8090}
       ATOF_POLL_INTERVAL: ${ATOF_POLL_INTERVAL:-1.0}
@@ -27,3 +35,8 @@ services:
       - ${DASH_HOME:-/home/aalmahrooqi}/.nvm:${DASH_HOME:-/home/aalmahrooqi}/.nvm:ro
       - ${DASH_HOME:-/home/aalmahrooqi}/.config:${DASH_HOME:-/home/aalmahrooqi}/.config:ro
       - ${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:ro
+      # Feed persistence (memory learning + skill evolution) across restarts.
+      - dashboard-state:/app/state
+
+volumes:
+  dashboard-state:
