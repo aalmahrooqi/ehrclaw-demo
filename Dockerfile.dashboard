@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY scripts/dashboard.py /app/dashboard.py
+
+EXPOSE 8090
+
+ENTRYPOINT ["python3", "/app/dashboard.py"]
