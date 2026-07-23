@@ -22,18 +22,8 @@ This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.
 
 ## Requirements
 
-- **Python 3.13+**
-- **[uv](https://docs.astral.sh/uv/)** for dependency management
+- **Python 3** — standard library only, used by `scripts/load_synthea.py` and the dashboard
 - **Docker** (for the FHIR server)
-
-Install the Python dependencies and activate the virtual environment:
-
-```bash
-uv sync
-source .venv/bin/activate
-```
-
-`uv sync` creates a `.venv/` and installs the pinned dependencies from `pyproject.toml` / `uv.lock`.
 
 ### 1. Download Sample Data
 ```bash
