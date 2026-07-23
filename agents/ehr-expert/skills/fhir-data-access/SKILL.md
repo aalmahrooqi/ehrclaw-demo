@@ -31,6 +31,12 @@ Responses are a `Bundle` of type `searchset`; results are under `entry[].resourc
 # Read one resource by id
 curl -s 'http://host.openshell.internal:8081/fhir/Patient/<id>'
 
+# Search patient by birthdate
+curl "http://http://host.openshell.internal:8081/fhir/Patient?birthdate=1992-10-14"
+
+# Search by patient name and birthdate
+curl -s "http://localhost:8081/fhir/Patient?birthdate=1992-10-14&given=Pete"
+
 # Count without fetching bodies
 curl -s 'http://host.openshell.internal:8081/fhir/Patient?_summary=count'
 
