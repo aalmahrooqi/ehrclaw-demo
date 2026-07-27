@@ -1,9 +1,9 @@
 ---
-name: rxnorm-resolve-cui
+name: rxnorm-resolve-rxcui
 description: Resolve free-text medication names, brand names, generic names, ingredients, or drug product descriptions to RxNorm RxCUIs using RxNav. Use when asked to normalize drug names, find a drug's CUI/RxCUI, map medication text to RxNorm concepts, or prepare drug identifiers for downstream label, interaction, or medication data lookups.
 ---
 
-# RxNorm Resolve CUI
+# RxNorm Resolve RxCUI
 
 Use this skill to turn free-text medication input into a normalized RxNorm concept. The main output is an RxCUI, plus the resolved concept name and any ambiguity notes.
 
@@ -126,4 +126,3 @@ When another skill needs drug identifiers, return a compact object:
   "confidence": "high"
 }
 ```
-

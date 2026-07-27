@@ -6,296 +6,133 @@ description: Prescreen patients in the connected FHIR dataset against one clinic
 # Clinical Trial Cohort Prescreener
 
 ## When to Use
-This is a clinical-trial pre-screening workflow.
+Use when the user provides one clinical trial, protocol, or set of eligibility criteria and asks to identify or rank possible matches in the FHIR population.
+Typical requests include:
 
-Use this skill when the user provides the text of one clinical trial and asks which patients in the connected FHIR dataset may match it.
+- "Find patients who could qualify for this trial."
+- "Screen our patient cohort against these inclusion and exclusion criteria."
+- "Compare these patients with this protocol and show the supporting evidence."
+- "Rank potential trial matches and identify what information is missing."
 
-Never describe a patient as definitively eligible.
-Use the terms:
+Do not use for general patient summaries, finding a suitable trial for one patient, or making a definitive eligibility decision.
 
-- potential match
-- possible match requiring more data
-- not a match based on available evidence
+## Scope and safety
 
-Final eligibility must be confirmed by the trial research team.
+Use for one trial when the user supplies eligibility criteria and asks which
+FHIR patients may match. Use **`fhir-data-access`** for every FHIR read.
 
-## Expected Input
-Required:
-- The trial's inclusion and exclusion criteria.
+- This is pre-screening, not an eligibility determination.
+- Never call a patient "eligible" or generate an eligibility probability.
+- Use only: `POTENTIAL_MATCH`, `POSSIBLE_MATCH_NEEDS_DATA`, or `NOT_A_MATCH`.
+- Missing records never prove that a condition or exclusion is absent.
+- Final eligibility requires review by the trial research team.
 
-Optional:
-- The clinical trial text.
-- A cohort description.
-- A maximum number of patients to screen.
-- An as-of date.
+If the user gives no cohort limit, derive a coarse cohort and fully screen at
+most 100 candidates. State that this is a limited candidate cohort, not
+necessarily the full FHIR population.
 
-When no as-of date is supplied, use all data currently available through the connected FHIR server.
-
-
-When no cohort limit is supplied:
-1. Derive a coarse candidate cohort using the trial's target condition, age range, and administrative sex where possible.
-2. Screen at most 100 candidate patients.
-3. Clearly state that the results cover a limited candidate cohort, not the entire FHIR population.
-
-## Additional skills required
-
-This skill does not query the FHIR server itself. Use the **`fhir-data-access`**
-skill for all reads, which covers:
-
-1. Searching or enumerating patients (including coarse filtering by
-   `birthdate`, `gender`, and condition `code`).
-2. Searching FHIR resources by patient.
-3. Reading individual FHIR resources when additional evidence is needed.
-
-Relevant resource types may include:
-- Patient
-- Condition
-- Observation
-- MedicationRequest
-- MedicationStatement
-- Procedure
-- Encounter
-- DiagnosticReport
-- CarePlan
-
-## Criteria
-
-Attempt direct evaluation of criteria involving:
-
-- Age.
-- Administrative sex.
-- Presence or absence of coded conditions.
-- Numeric laboratory values.
-- Laboratory date windows.
-- Presence of medications.
-- Presence of procedures.
-- Encounter history.
-- Simple date relationships.
-- Explicit minimum or maximum thresholds.
-
-Only compare numeric values when the patient result and trial criterion
-use the same unit, or when an available tool performs a reliable unit
-conversion.
-
-Mark the criterion as UNKNOWN when units cannot be compared safely.
-
-## Procedure
+## Workflow
 
 ### 1. Parse the trial
 
-Extract:
+Extract the target condition, age range, administrative-sex restrictions, and
+all inclusion and exclusion criteria. Split criteria into atomic statements,
+preserve their original wording, and assign stable IDs: `I1`, `I2`, ... and
+`E1`, `E2`, ...
 
-- Trial title or identifier, when present.
-- Target disease or condition.
-- Minimum and maximum age.
-- Administrative sex restrictions.
-- Inclusion criteria.
-- Exclusion criteria.
+Classify each criterion by domain (demographic, condition, observation,
+medication, procedure, encounter, temporal, or clinical judgment) and whether
+it is directly evaluable, unknown with current data, or requires review.
 
-Split the criteria into atomic statements.
+### 2. Build the candidate cohort
 
-Assign each criterion a stable identifier:
-
-- I1, I2, I3 for inclusion criteria.
-- E1, E2, E3 for exclusion criteria.
-
-Preserve the original criterion wording.
-
-### 2. Classify each criterion
-
-For every criterion, assign:
-
-- Type: inclusion or exclusion.
-- Domain: demographic, condition, observation, medication,
-  procedure, encounter, temporal, or clinical judgment.
-- Evaluation method:
-  - DIRECT
-  - UNKNOWN_WITH_CURRENT_DATA
-  - REQUIRES_REVIEW
-
-### 3. Build a coarse candidate cohort
-
-Before retrieving full patient charts, apply the cheapest reliable
-filters available.
-
-Prefer:
+Apply the cheapest reliable filters before retrieving detailed records:
 
 1. Target condition.
 2. Age range.
 3. Administrative sex.
-4. Other simple coded conditions.
+4. Other unambiguous coded conditions.
 
-Do not exclude a patient through approximate semantic matching alone.
+Do not exclude through approximate semantic matching. Retain patients when a
+code or display is ambiguous and mark the criterion `REVIEW`.
 
-If a FHIR code or display is ambiguous, retain the patient and mark
-the relevant criterion for review.
+Track the number initially considered, remaining after filtering, fully
+screened, and any limit applied.
 
-Report:
+### 3. Evaluate candidates
 
-- Number of patients considered.
-- Number remaining after coarse filtering.
-- Any limit applied to the candidate cohort.
+Retrieve only resources relevant to the criteria. Directly evaluate age,
+administrative sex, coded conditions, medications, procedures, encounters,
+numeric labs, date windows, simple temporal relationships, and explicit
+thresholds when supported by structured data.
 
-### 4. Evaluate each candidate
+Assign one result per criterion:
 
-Retrieve only the resources relevant to the criteria.
+- **PASS** — direct evidence supports the criterion.
+- **FAIL** — direct evidence rules the patient out, such as age outside range,
+  a documented exclusion condition, or a value outside an allowed threshold.
+- **NO_EVIDENCE_OF_EXCLUSION** — exclusion criterion only; the search found no
+  matching evidence. Say: "No evidence of this exclusion was found in the
+  available FHIR record." Do not claim the exclusion is absent.
+- **UNKNOWN** — required data is missing, coverage or timelines are
+  insufficient, no relevant resource was found, units are incompatible, or
+  structured data cannot resolve the criterion.
+- **REVIEW** — evidence exists, but interpretation requires clinical or
+  protocol judgment.
 
-For every criterion, produce one of these results:
+Only compare numeric values when units match or a reliable conversion is
+available; otherwise use `UNKNOWN`.
 
-#### PASS
+Every `PASS` and `FAIL` must cite direct evidence, preferably
+`ResourceType/id`, clinical date, code/display, value/unit, and a brief
+explanation. For `UNKNOWN` and `NO_EVIDENCE_OF_EXCLUSION`, state what was
+searched and what was unavailable. Cite the smallest sufficient evidence set,
+not the entire chart.
 
-Direct patient evidence supports eligibility for this criterion.
+### 4. Assign the overall result
 
-Examples:
+- **POTENTIAL_MATCH** — no `FAIL`; all essential inclusion criteria are
+  `PASS`; unresolved exclusions are explicitly labeled
+  `NO_EVIDENCE_OF_EXCLUSION`, `UNKNOWN`, or `REVIEW`.
+- **POSSIBLE_MATCH_NEEDS_DATA** — no `FAIL`, but an essential inclusion
+  criterion is `UNKNOWN` or `REVIEW`. State what additional information would
+  resolve it.
+- **NOT_A_MATCH** — an inclusion criterion has a direct `FAIL`, or a documented
+  exclusion criterion produces a `FAIL`. List the blocking criteria.
 
-- The inclusion criterion requires age 18 or older and the patient is 54.
-- The required diagnosis is present.
-- A laboratory result is within the specified range and time window.
+Rank in that order. Within `POTENTIAL_MATCH`, prefer fewer `UNKNOWN` items,
+then fewer `REVIEW` items, more directly supported `PASS` results, and more
+recent supporting evidence.
 
-#### FAIL
+### 5. Verify
 
-Direct patient evidence rules the patient out.
+Before responding, confirm:
 
-Examples:
+- Every criterion appears in the matrix.
+- Every `PASS` and `FAIL` has direct FHIR evidence.
+- Missing data was not treated as absence.
+- No resource or unit conversion was invented.
+- Inclusion/exclusion logic and overall results follow the rules above.
+- Cohort counts reconcile.
+- Wording says "potential match," never "eligible."
 
-- The patient is younger than the minimum age.
-- A required inclusion diagnosis is not present when the available data directly establishes a different diagnosis.
-- The patient has a documented exclusion condition.
-- A laboratory value falls outside an explicit permitted range.
-
-#### NO_EVIDENCE_OF_EXCLUSION
-
-Use only for exclusion criteria when no matching evidence was found.
-
-This does not prove that the exclusion is absent.
-
-Always use wording such as:
-
-"No evidence of this exclusion was found in the available FHIR record."
-
-Never rewrite this as:
-
-"The patient does not have this condition."
-
-#### UNKNOWN
-
-Use when:
-
-- Required information is missing.
-- Record coverage is insufficient.
-- The relevant resource was not found.
-- Units are incompatible.
-- The criterion cannot be resolved from available structured data.
-- The medication or condition timeline is incomplete.
-
-#### REVIEW
-
-Use when evidence exists but interpreting it requires clinical or
-protocol judgment.
-
-### 5. Attach evidence
-Every PASS or FAIL must reference supporting FHIR evidence.
-
-Include, when available:
-
-- Resource type.
-- Resource ID.
-- Clinical date.
-- Code and display.
-- Numeric value and unit.
-- Medication or procedure name.
-- A short explanation of why the evidence is relevant.
-
-Do not cite an entire chart when one or two resources support the result.
-
-UNKNOWN and NO_EVIDENCE_OF_EXCLUSION results should describe what was
-searched and what information was unavailable.
-
-### 6. Determine the overall prescreen result
-
-Assign one overall result.
-
-#### POTENTIAL_MATCH
-
-Use when:
-
-- No criterion is a definite FAIL.
-- All essential inclusion criteria are PASS.
-- Any unresolved exclusion criteria are explicitly reported as
-  NO_EVIDENCE_OF_EXCLUSION, UNKNOWN, or REVIEW.
-
-#### POSSIBLE_MATCH_NEEDS_DATA
-
-Use when:
-
-- No criterion is a definite FAIL.
-- One or more essential inclusion criteria are UNKNOWN or REVIEW.
-
-Explain exactly what additional information would resolve the case.
-
-#### NOT_A_MATCH
-
-Use when:
-
-- At least one inclusion criterion is a definite FAIL.
-- Or at least one exclusion criterion is directly present and therefore
-  produces a FAIL.
-
-List the blocking criteria.
-
-Never use the overall result ELIGIBLE.
-
-### 7. Rank the results
-
-Rank patients in this order:
-
-1. POTENTIAL_MATCH.
-2. POSSIBLE_MATCH_NEEDS_DATA.
-3. NOT_A_MATCH.
-
-Within POTENTIAL_MATCH, rank by:
-
-1. Fewest UNKNOWN criteria.
-2. Fewest REVIEW criteria.
-3. Greatest number of directly supported PASS results.
-4. Most recent supporting evidence.
-
-Do not generate an arbitrary eligibility probability.
-
-### 8. Verify before responding
-
-Before presenting the results, check:
-
-- Every trial criterion appears in the criterion matrix.
-- Every PASS and FAIL has direct FHIR evidence.
-- No FHIR resource was invented.
-- No unsupported unit conversion was performed.
-- No missing record was treated as proof of absence.
-- Inclusion and exclusion logic was not reversed.
-- The patient counts reconcile.
-- The overall result follows the rules above.
-- The wording says potential match, not eligible.
-
-## Output Format
+## Output
 
 Use this structure:
 
+```markdown
 # Clinical Trial Cohort Prescreen
 
 ## Trial
-
-- Title:
-- Identifier:
+- Title / identifier:
 - Target condition:
-- Trial text supplied by user:
 - Criteria parsed:
 - Criteria requiring manual interpretation:
 
 ## Cohort
-
-- Patients initially considered:
-- Patients remaining after coarse filtering:
-- Patients fully screened:
+- Initially considered:
+- Remaining after coarse filtering:
+- Fully screened:
 - Cohort limit:
 - FHIR data cutoff:
 
@@ -306,47 +143,31 @@ Use this structure:
 - Screening errors:
 
 ## Potential Matches
-
 ### Patient: Patient/{id}
-
 **Overall result:** POTENTIAL_MATCH
-
-**Summary:** One or two sentences explaining the result.
+**Summary:** [one or two sentences]
 
 | Criterion | Type | Result | Evidence | Explanation |
 |---|---|---|---|---|
-| I1 | Inclusion | PASS | Patient/{id} | Patient is within the required age range. |
-| I2 | Inclusion | PASS | Condition/{id} | Required condition is documented. |
-| E1 | Exclusion | NO_EVIDENCE_OF_EXCLUSION | Search performed | No matching condition was found in the available record. |
-| E2 | Exclusion | REVIEW | Observation/{id} | The trial uses an undefined clinical term. |
+| I1 | Inclusion | PASS | ResourceType/id | ... |
+| E1 | Exclusion | NO_EVIDENCE_OF_EXCLUSION | Search performed | ... |
 
-**Unknown or review items:**
-
-- List unresolved criteria.
-- State what information would resolve each item.
-
-**Key supporting resources:**
-
-- ResourceType/id — date — relevance.
+**Unknown or review items:** [item and data needed]
+**Key supporting resources:** ResourceType/id — date — relevance
 
 ## Possible Matches Needing Data
-
-Use the same structure, emphasizing missing information.
+[Use the same patient structure, emphasizing unresolved information.]
 
 ## Excluded Summary
-For patients classified as NOT_A_MATCH, provide a compact table:
-
 | Patient | Blocking criterion | Evidence | Reason |
 |---|---|---|---|
 
-Avoid producing a full criterion matrix for every excluded patient
-unless the user requests it.
-
 ## Limitations
-
-Always state:
-
-- This is automated pre-screening against structured FHIR data.
+- Automated pre-screening against structured FHIR data.
 - Missing information may change the result.
 - No patient has been confirmed eligible.
 - Trial staff must review the official protocol and source records.
+```
+
+Use full criterion matrices for potential/possible matches. Keep excluded
+patients compact unless the user requests full matrices.

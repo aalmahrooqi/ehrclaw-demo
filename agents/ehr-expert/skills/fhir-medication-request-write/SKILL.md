@@ -1,9 +1,9 @@
 ---
-name: fhir-prescribe
+name: fhir-medication-request-write
 description: Create, update, or cancel prescription orders (FHIR R4 MedicationRequest) on the local HAPI FHIR server via its REST API. Use when explicitly instructed to write, add, create, change, refill, stop, or cancel a medication order/prescription for a specific patient. This skill RECORDS an order that has already been specified; it does not decide, recommend, or choose what to prescribe.
 ---
 
-# FHIR Prescribe (MedicationRequest)
+# FHIR MedicationRequest Write
 
 Write a prescription order to the project's FHIR server by creating or updating a `MedicationRequest` resource. This is the write counterpart to `fhir-data-access`.
 
@@ -19,14 +19,14 @@ Write a prescription order to the project's FHIR server by creating or updating 
 - **Never invent** a medication, dose, route, patient, or prescriber. If any required field is missing or ambiguous, **STOP and ask** — do not guess.
 - **Confirm before writing**: show the fully-constructed JSON to the user and get an explicit go-ahead before sending the `POST`/`PUT`.
 - **Verify the patient first** with `fhir-data-access` (`GET Patient/<id>`). Never write against an unknown or guessed patient id.
-- Prefer coding the drug with an **RxNorm RxCUI** (via `rxnorm-resolve-cui`); when clinically relevant, review the label/interactions (via `drug-interaction-label-check`) before writing.
+- Prefer coding the drug with an **RxNorm RxCUI** (via `rxnorm-resolve-rxcui`); when clinically relevant, review the label/interactions (via `drug-label-interactions`) before writing.
 - **Read the resource back** after writing to confirm it was stored.
 - End any clinical output with: *AI generated content, always consult with a physician or pharmacist.*
 
 ## Prerequisite chain
 
-1. Resolve the medication text to an RxCUI → skill `rxnorm-resolve-cui`.
-2. When relevant, check interactions/warnings → skill `drug-interaction-label-check`.
+1. Resolve the medication text to an RxCUI → skill `rxnorm-resolve-rxcui`.
+2. When relevant, check interactions/warnings → skill `drug-label-interactions`.
 3. Confirm the patient id exists → skill `fhir-data-access` (`GET Patient/<id>`).
 4. Build the `MedicationRequest`, show it, confirm, then create.
 
@@ -84,7 +84,7 @@ curl -s -i -X POST 'http://host.openshell.internal:8081/fhir/MedicationRequest' 
 }'
 ```
 
-The `code` value must come from `rxnorm-resolve-cui`, not be hand-typed. `<patientId>` and `<practitionerId>` must be confirmed real ids.
+The `code` value must come from `rxnorm-resolve-rxcui`, not be hand-typed. `<patientId>` and `<practitionerId>` must be confirmed real ids.
 
 ### Building the JSON safely (recommended)
 
@@ -100,7 +100,7 @@ mr = {
     "medicationCodeableConcept": {
         "coding": [{
             "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
-            "code": "313782",                       # from rxnorm-resolve-cui
+            "code": "313782",                       # from rxnorm-resolve-rxcui
             "display": "Acetaminophen 325 MG Oral Tablet",
         }],
         "text": "Acetaminophen 325 MG Oral Tablet",
@@ -165,7 +165,7 @@ curl -s -i -X PUT 'http://host.openshell.internal:8081/fhir/MedicationRequest/<i
 ## Output format
 
 ```text
-Prescription write: Acetaminophen 325 MG Oral Tablet
+MedicationRequest write: Acetaminophen 325 MG Oral Tablet
 
 Order (as recorded):
 - Patient: Patient/<id> (confirmed)

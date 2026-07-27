@@ -1,9 +1,9 @@
 ---
-name: drug-interaction-label-check
+name: drug-label-interactions
 description: Retrieve openFDA drug label information for one known RxNorm RxCUI and summarize the drug interaction information contained in that label. Use when given a single RxCUI and asked what interactions, warnings, contraindicated drugs, or interaction-related label text openFDA reports for that drug.
 ---
 
-# Drug Interaction Label Check
+# Drug Label Interactions
 
 Use this skill to fetch the FDA label for one drug by RxCUI and extract the interaction-related information from that drug's label.
 

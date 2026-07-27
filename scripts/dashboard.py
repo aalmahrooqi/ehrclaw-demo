@@ -41,9 +41,9 @@ SKILLS_DIR = "/sandbox/.hermes/skills"      # agent skill library (SKILL.md per 
 # SKILLS_DIR). Override via HERMES_CUSTOM_SKILLS / --custom-skills. If left empty
 # we fall back to auto-detecting anything not shipped in the base image.
 CUSTOM_SKILLS: set[str] = {
-    "summarize-patient-chart", "fhir-data-access", "fhir-prescribe",
-    "clinical-trial-cohort-prescreener", "drug-interaction-labels-check",
-    "rxnorm-resolve-cui",
+    "summarize-patient-chart", "fhir-data-access",
+    "fhir-medication-request-write", "clinical-trial-cohort-prescreener",
+    "drug-label-interactions", "rxnorm-resolve-rxcui",
 }
 POLL_INTERVAL = 1.0          # seconds between sandbox polls
 MEMORY_POLL_INTERVAL = 5.0   # seconds between memory-dir polls

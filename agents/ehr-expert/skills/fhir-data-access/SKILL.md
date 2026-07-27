@@ -63,6 +63,7 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 | `status` | Filter by status | `status=completed` |
 | `birthdate` | Filter patients by date of birth (use `ge`/`le` prefixes for a range) | `birthdate=ge1960-01-01&birthdate=le2007-01-01` |
 | `gender` | Filter patients by administrative sex | `gender=male` |
+| `clinical-status` | Filter conditions by clinical state | `clinical-status=active` |
 
 ## Demographic and coded filtering
 
