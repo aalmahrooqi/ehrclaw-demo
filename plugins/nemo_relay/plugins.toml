@@ -5,16 +5,34 @@ kind = "observability"
 enabled = true
 
 [components.config]
-version = 1
+version = 2
 
 [components.config.atof]
 enabled = true
+
+[[components.config.atof.sinks]]
+type = "file"
 output_directory = "/sandbox/.nemo-relay/atof"
 
 
 [components.config.atif]
 enabled = true
 output_directory = "/sandbox/.nemo-relay/atif"
+
+[[components]]
+kind = "pii_redaction"
+enabled = true
+
+[components.config]
+version = 1
+codec = "openai_chat"
+
+[[components.config.profiles]]
+mode = "builtin"
+
+[components.config.profiles.builtin]
+action = "mask"
+pattern = '\b(?:(?:19|20)\d{2}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:(?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2]))[-/.](?:19|20)\d{2})\b'
 
 [[components]]
 kind = "adaptive"

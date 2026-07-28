@@ -253,7 +253,7 @@ RUN node --experimental-strip-types /src/lib/messaging/applier/build/messaging-b
 # ── EHR Claw: bake nemo-relay into the image (installed as root, before the
 # runtime drops to the sandbox user). Baked at build time so nothing needs to
 # pip-install inside the running sandbox.
-RUN /usr/local/bin/uv pip install nemo-relay==0.5.0
+RUN /usr/local/bin/uv pip install nemo-relay==0.6.0
 
 # ── EHR Claw: bake the NeMo Guardrails engine for the nemo_guardrails LOCAL
 # backend. The remote backend is a dead end for this agent — it rejects the
@@ -264,7 +264,7 @@ RUN /usr/local/bin/uv pip install nemo-relay==0.5.0
 # https://inference.local for the self-check. Runtime pypi egress is denied, so
 # this MUST be baked at build time.
 #
-# nemo-relay 0.5.0's local worker hard-pins nemoguardrails==0.22.0, which in turn
+# nemo-relay 0.6.0's local worker hard-pins nemoguardrails==0.22.0, which in turn
 # hard-depends on `annoy`. annoy ships source-only on PyPI (no py3.13 wheel) and
 # the hardening step above stripped gcc/g++, so a normal install dies compiling
 # annoy's C++ extension. We vendor a prebuilt annoy cp313 wheel and point uv at
