@@ -443,12 +443,9 @@ ARG NEMOCLAW_DARWIN_VM_COMPAT=0
 # appends to the OpenShell trust bundle at runtime. The CA is a public
 # certificate, not a secret, so baking it into an image layer is acceptable.
 ARG NEMOCLAW_CORPORATE_CA_B64
-# Total model context window (input + output tokens). Empty by default so
-# Hermes auto-detects from the endpoint's /v1/models max_model_len; onboard
-# rewrites this ARG (via dockerfile-patch) when it probes a runtime value or
-# the user sets NEMOCLAW_CONTEXT_WINDOW, so Hermes' NemotronH metadata default
-# cannot override the real window (#6177).
-ARG NEMOCLAW_CONTEXT_WINDOW=
+# Total model context window (input + output tokens). Default to one million
+# tokens for Nemotron 3 Ultra; callers can still override this build argument.
+ARG NEMOCLAW_CONTEXT_WINDOW=1000000
 
 # Promote persistent image config to env vars for config generation.
 # NEMOCLAW_MESSAGING_PLAN_B64 intentionally remains ARG-only: Docker exposes it
