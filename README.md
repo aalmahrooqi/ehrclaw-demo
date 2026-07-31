@@ -39,16 +39,9 @@ docker compose up -d
 
 The server listens on **http://localhost:8081**
 
-| URL | Description |
-|---|---|
-| http://localhost:8081/ | HAPI FHIR web UI (search and browse resources) |
-| http://localhost:8081/fhir | FHIR R4 REST API base URL |
-| http://localhost:8081/fhir/metadata | CapabilityStatement |
-
-Wait until the server is ready:
-
+Sanity check:
 ```bash
-curl http://localhost:8081/fhir/metadata
+curl -s 'http://localhost:8081/fhir/Patient?_summary=count'
 ```
 
 ### 3. Load Synthea data

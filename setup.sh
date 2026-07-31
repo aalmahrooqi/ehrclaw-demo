@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
-
+NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS=inference-api.nvidia.com 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SANDBOX_NAME="hermes-health"
 NEMOCLAW_SOURCE="${NEMOCLAW_SOURCE:-${HOME}/.nemoclaw/source}"
