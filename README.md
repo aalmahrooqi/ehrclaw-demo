@@ -23,7 +23,8 @@ This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.
 ## Requirements
 
 - **Python 3** — standard library only, used by `scripts/load_synthea.py` and the dashboard
-- **Docker** (for the FHIR server)
+- **Docker**
+- [**NemoClaw**](https://github.com/NVIDIA/NemoClaw) v0.0.97 (`NEMOCLAW_INSTALL_TAG=v0.0.97 curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`)
 
 ### 1. Download Sample Data
 ```bash
@@ -63,13 +64,6 @@ This posts each Synthea transaction bundle to the FHIR API. The first full load 
 ## Agent Setup
 
 The Hermes agent runs in an OpenShell sandbox managed by the **NemoClaw** CLI.
-
-### Prerequisite: install NemoClaw
-
-- Install the `nemoclaw` version 0.0.70 CLI first and make sure it's on your `PATH`:
-```bash
-nemoclaw --version # 
-```
 
 ### Quick install
 

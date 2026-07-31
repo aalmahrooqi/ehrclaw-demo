@@ -12,7 +12,7 @@ EHR_EXPERT="${SCRIPT_DIR}/agents/ehr-expert"
 NEMO_RELAY_PLUGINS_TOML="${SCRIPT_DIR}/plugins/nemo_relay/plugins.toml"
 NEMO_GUARDRAILS_CONFIG="${SCRIPT_DIR}/configs/nemo_guardrails/config.yaml"
 GUARDRAILS_WHEELS="${SCRIPT_DIR}/vendor/wheels"
-CONTEXT_PATHS=(agents/hermes nemoclaw-blueprint src/lib/messaging scripts)
+CONTEXT_PATHS=(agents/hermes nemoclaw-blueprint tools/mcp-tool-discovery-runtime src/lib/tool-disclosure.ts src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.85.json src/lib/messaging scripts)
 
 case "${1:-}" in
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
