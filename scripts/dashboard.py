@@ -1084,7 +1084,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .chip[data-cat=llm].on { background: var(--llm); color:#001427; }
   .chip[data-cat=tool].on { background: var(--tool); color:#00291a; }
   .chip[data-cat=mark].on { background: var(--mark); color:#1a0033; }
-  label.toggle { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .layout { display: flex; align-items: stretch; }
   .sidebar { width: 260px; flex: none; border-right: 1px solid var(--border); background: var(--panel);
              height: calc(100vh - 53px); position: sticky; top: 53px; overflow-y: auto; }
@@ -1103,7 +1102,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
                padding: 3px 4px; border-radius: 5px; opacity: .55; }
   .file .fdl:hover { color: var(--accent); opacity: 1; background: var(--bg); }
   .file .fdl svg { display: block; }
-  .file.all .fname { font-family: inherit; }
   .sidebar .empty-files { color: var(--muted); font-size: 12px; padding: 6px 14px; }
   main { flex: 1; min-width: 0; max-width: 1100px; margin: 0 auto; padding: 16px 18px 80px; }
 
@@ -1249,7 +1247,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <button class="chip" id="expandAll">expand all</button>
   <button class="chip" id="collapseAll">collapse all</button>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
-  <label class="toggle"><input type="checkbox" id="follow" checked /> auto-scroll</label>
 </header>
 <div class="layout">
   <aside class="sidebar">
@@ -1270,11 +1267,10 @@ const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const countPill = document.getElementById('countPill');
 const srcEl = document.getElementById('src');
-const followBox = document.getElementById('follow');
 const filelistEl = document.getElementById('filelist');
 
 let sinceSeq = 0;
-let selectedFile = null;   // null = all files
+let selectedFile = null;   // set to the newest file after initial discovery
 let knownFiles = "";       // signature to avoid needless re-render
 const active = { agent: true, llm: true, tool: true, mark: true };
 const openScopes = {};     // uuid -> { el, start }
@@ -1728,7 +1724,6 @@ function handleEvent(ev) {
   if (isScope && phase === 'start') openScopes[ev.uuid] = { el: row, start: ev };
 
   empty.style.display = 'none';
-  if (followBox.checked) window.scrollTo(0, document.body.scrollHeight);
 }
 
 /* ------------------------------------------------------ file browser */
@@ -1747,10 +1742,8 @@ function renderFileList(files) {
   const sig = JSON.stringify(files) + '|' + selectedFile;
   if (sig === knownFiles) { renderFileSelection(); return; }
   knownFiles = sig;
-  const total = files.reduce((n, f) => n + f.count, 0);
-  let html = '<div class="file all' + (selectedFile === null ? ' sel' : '') + '" data-file="">' +
-             '<span class="fname">All files</span><span class="fcount">' + total + '</span></div>';
-  if (!files.length) html += '<div class="empty-files">no .jsonl files found</div>';
+  let html = '';
+  if (!files.length) html = '<div class="empty-files">no .jsonl files found</div>';
   for (const f of files) {
     html += '<div class="file' + (selectedFile === f.name ? ' sel' : '') + '" data-file="' + esc(f.name) + '">' +
             '<span class="fname" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
@@ -1763,13 +1756,13 @@ function renderFileList(files) {
   }
   filelistEl.innerHTML = html;
   filelistEl.querySelectorAll('.file').forEach(e =>
-    e.addEventListener('click', () => selectFile(e.dataset.file || null)));
+    e.addEventListener('click', () => selectFile(e.dataset.file)));
   filelistEl.querySelectorAll('.fdl').forEach(a =>
     a.addEventListener('click', ev => ev.stopPropagation()));
 }
 function renderFileSelection() {
   filelistEl.querySelectorAll('.file').forEach(e =>
-    e.classList.toggle('sel', (e.dataset.file || null) === selectedFile));
+    e.classList.toggle('sel', e.dataset.file === selectedFile));
 }
 
 document.querySelectorAll('.chip[data-cat]').forEach(chip => {
@@ -1811,16 +1804,20 @@ async function pollOnce() {
   sinceSeq = data.seq;
   statusDot.className = 'dot ' + (data.status === 'live' ? 'live' : data.status === 'error' ? 'error' : '');
   statusText.textContent = data.status === 'error' ? ('error: ' + (data.error || '')) : data.status;
-  const shown = selectedFile
-    ? ((data.files.find(f => f.name === selectedFile) || {}).count || 0)
-    : data.count;
+  const files = data.files || [];
+  const present = new Set(files.map(f => f.name));
+  if (!selectedFile || !present.has(selectedFile)) {
+    selectFile(files.length ? files[0].name : null);
+    renderFileList(files);
+    return;
+  }
+
+  const shown = ((files.find(f => f.name === selectedFile) || {}).count || 0);
   countPill.textContent = shown + ' events';
-  srcEl.textContent = data.sandbox + ' : ' + (selectedFile || data.dir);
-  renderFileList(data.files || []);
+  srcEl.textContent = data.sandbox + ' : ' + selectedFile;
+  renderFileList(files);
 
   // Reflect deletions: if a file vanished from the sandbox, drop its rows.
-  const present = new Set((data.files || []).map(f => f.name));
-  if (selectedFile && !present.has(selectedFile)) { selectFile(null); return; }
   let removed = false;
   stream.querySelectorAll('.row').forEach(r => {
     const f = r.dataset.file;
@@ -1835,8 +1832,7 @@ async function pollOnce() {
   evs.forEach(handleEvent);
   if (!stream.children.length) {
     empty.style.display = '';
-    empty.textContent = selectedFile ? 'No events in this file yet…'
-                                     : 'Waiting for trace events from the sandbox…';
+    empty.textContent = 'No events in this file yet…';
   }
 }
 async function loop() {
