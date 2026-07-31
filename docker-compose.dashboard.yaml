@@ -29,11 +29,14 @@ services:
       ATOF_POLL_INTERVAL: ${ATOF_POLL_INTERVAL:-1.0}
       HERMES_API_HOST: ${HERMES_API_HOST:-127.0.0.1}
       HERMES_API_PORT: ${HERMES_API_PORT:-8642}
-      HERMES_DASHBOARD_PORT: ${HERMES_DASHBOARD_PORT:-18790}
+      HERMES_DASHBOARD_PORT: ${HERMES_DASHBOARD_PORT:-18789}
     volumes:
       - ${DASH_HOME:-/home/aalmahrooqi}/.local:${DASH_HOME:-/home/aalmahrooqi}/.local:ro
       - ${DASH_HOME:-/home/aalmahrooqi}/.nvm:${DASH_HOME:-/home/aalmahrooqi}/.nvm:ro
       - ${DASH_HOME:-/home/aalmahrooqi}/.config:${DASH_HOME:-/home/aalmahrooqi}/.config:ro
+      # NemoClaw v0.0.97 updates OpenShell gateway selection/permissions while
+      # executing sandbox commands; keep only that nested config writable.
+      - ${DASH_HOME:-/home/aalmahrooqi}/.config/openshell:${DASH_HOME:-/home/aalmahrooqi}/.config/openshell
       - ${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:ro
       # Feed persistence (memory learning + skill evolution) across restarts.
       - dashboard-state:/app/state

@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,7 @@ HERMES_DASHBOARD_PORT = 18790  # native Hermes web dashboard (forwarded to host)
 HERMES_MODEL = "hermes-agent"
 GATEWAY_TOKEN = ""           # bearer token for the Hermes agent API (discovered at startup)
 _TOKEN_LOCK = threading.Lock()
+_NEMOCLAW_COMMAND: list[str] | None = None
 
 
 class TraceStore:
@@ -437,12 +439,40 @@ SKILL_STORE = SkillStore()
 # ---------------------------------------------------------------------------
 # Sandbox access helpers
 # ---------------------------------------------------------------------------
+def _nemoclaw_command() -> list[str]:
+    """Resolve the current CLI without relying on a stale global npm symlink."""
+    global _NEMOCLAW_COMMAND
+    if _NEMOCLAW_COMMAND is not None:
+        return _NEMOCLAW_COMMAND
+
+    override = os.environ.get("NEMOCLAW_CLI", "").strip()
+    if override:
+        command = shlex.split(override)
+        if not command:
+            raise RuntimeError("NEMOCLAW_CLI is empty")
+        _NEMOCLAW_COMMAND = command
+        return command
+
+    home = Path.home()
+    source_cli = home / ".nemoclaw/source/bin/nemoclaw.js"
+    node_candidates = sorted((home / ".nvm/versions/node").glob("v*/bin/node"))
+    if source_cli.is_file() and node_candidates:
+        _NEMOCLAW_COMMAND = [str(node_candidates[-1]), str(source_cli)]
+    else:
+        _NEMOCLAW_COMMAND = ["nemoclaw"]
+    return _NEMOCLAW_COMMAND
+
+
 def _exec(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["nemoclaw", SANDBOX, "exec", "--no-tty", "--", *args],
+    proc = subprocess.run(
+        [*_nemoclaw_command(), SANDBOX, "exec", "--no-tty", "--", *args],
         capture_output=True,
         timeout=EXEC_TIMEOUT,
     )
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(detail or f"NemoClaw exec failed with status {proc.returncode}")
+    return proc
 
 
 def list_files() -> dict[str, int]:
@@ -478,7 +508,7 @@ def discover_gateway_token() -> str:
         return env_tok
     try:
         proc = subprocess.run(
-            ["nemoclaw", SANDBOX, "gateway-token", "--quiet"],
+            [*_nemoclaw_command(), SANDBOX, "gateway-token", "--quiet"],
             capture_output=True,
             timeout=15,
         )
