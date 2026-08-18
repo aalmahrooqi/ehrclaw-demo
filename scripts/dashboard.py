@@ -1925,10 +1925,11 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
              margin: 8px 0; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--code-fg);
              font: 12px/1.5 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
-  .md table.md-table { border-collapse: collapse; margin: 8px 0; display: block; width: max-content;
-             max-width: 100%; overflow-x: auto; font-size: 13px; }
+  .md table.md-table { border-collapse: collapse; width: 100%; min-width: max-content; font-size: 13px; }
+  .md .md-table-wrap { overflow-x: auto; margin: 8px 0; max-width: 100%; -webkit-overflow-scrolling: touch; }
   .md table.md-table th, .md table.md-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left;
-             vertical-align: top; }
+             vertical-align: top; white-space: nowrap; }
+  .md table.md-table td { white-space: normal; }
   .md table.md-table th { background: var(--panel2); color: var(--text); font-weight: 700; }
   .md table.md-table tr:nth-child(even) td { background: rgba(127,127,127,.06); }
 
@@ -2004,8 +2005,19 @@ function mdLite(text) {
   const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   // GitHub-style pipe tables
   const isSep = s => /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(s) && s.includes('-');
-  const isRow = s => s.includes('|') && s.trim() !== '';
+  const isRow = s => /^\s*\|?.+\|/.test(s) && s.includes('|') && s.trim() !== '';
   const cells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  const skipBlank = (arr, idx) => { while (idx < arr.length && arr[idx].trim() === '') idx++; return idx; };
+  const emitTable = (header, align, bodyRows) => {
+    const cell = (c, k, tag) =>
+      '<' + tag + (align[k] ? ' style="text-align:' + align[k] + '"' : '') + '>' + inline(c) + '</' + tag + '>';
+    const th = cells(header).map((c, k) => cell(c, k, 'th')).join('');
+    const body = bodyRows.map(row =>
+      '<tr>' + cells(row).map((c, k) => cell(c, k, 'td')).join('') + '</tr>'
+    ).join('');
+    return '<div class="md-table-wrap"><table class="md-table"><thead><tr>' + th +
+           '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  };
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     if (/^\s*```/.test(raw)) {
@@ -2014,23 +2026,33 @@ function mdLite(text) {
       continue;
     }
     if (inCode) { code += raw + '\n'; continue; }
-    // A header row followed by a |---|---| delimiter starts a table.
-    if (isRow(raw) && i + 1 < lines.length && isSep(lines[i + 1])) {
-      closeLists();
-      const align = cells(lines[i + 1]).map(c => {
-        const l = c.startsWith(':'), r = c.endsWith(':');
-        return (l && r) ? 'center' : r ? 'right' : l ? 'left' : '';
-      });
-      const cell = (c, k, tag) =>
-        '<' + tag + (align[k] ? ' style="text-align:' + align[k] + '"' : '') + '>' + inline(c) + '</' + tag + '>';
-      const th = cells(raw).map((c, k) => cell(c, k, 'th')).join('');
-      let body = '', j = i + 2;
-      for (; j < lines.length && isRow(lines[j]) && !isSep(lines[j]); j++) {
-        body += '<tr>' + cells(lines[j]).map((c, k) => cell(c, k, 'td')).join('') + '</tr>';
+    if (isRow(raw)) {
+      const sepAt = skipBlank(lines, i + 1);
+      if (sepAt < lines.length && isSep(lines[sepAt])) {
+        closeLists();
+        const align = cells(lines[sepAt]).map(c => {
+          const l = c.startsWith(':'), r = c.endsWith(':');
+          return (l && r) ? 'center' : r ? 'right' : l ? 'left' : '';
+        });
+        const bodyRows = [];
+        let j = sepAt + 1;
+        for (; j < lines.length && isRow(lines[j]) && !isSep(lines[j]); j++) bodyRows.push(lines[j]);
+        html += emitTable(raw, align, bodyRows);
+        i = j - 1;
+        continue;
       }
-      html += '<table class="md-table"><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody></table>';
-      i = j - 1;
-      continue;
+      const nextAt = skipBlank(lines, i + 1);
+      if (nextAt < lines.length && isRow(lines[nextAt]) && !isSep(lines[nextAt])) {
+        closeLists();
+        const colN = cells(raw).length;
+        const align = Array(colN).fill('');
+        const bodyRows = [];
+        let j = nextAt;
+        for (; j < lines.length && isRow(lines[j]) && !isSep(lines[j]); j++) bodyRows.push(lines[j]);
+        html += emitTable(raw, align, bodyRows);
+        i = j - 1;
+        continue;
+      }
     }
     const hd = raw.match(/^\s*(#{1,6})\s+(.*)$/);
     if (hd) { closeLists(); const lv = hd[1].length; html += '<h' + lv + '>' + inline(hd[2].replace(/\s+#+\s*$/, '')) + '</h' + lv + '>'; continue; }
