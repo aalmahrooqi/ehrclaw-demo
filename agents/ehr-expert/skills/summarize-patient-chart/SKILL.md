@@ -17,32 +17,33 @@ Not this skill:
 - Screening many patients against trial criteria → use
   `clinical-trial-cohort-prescreener`.
 
-## Reads are delegated
+## One command pulls the chart
 
-This skill does not define its own queries. Use the **`fhir-data-access`** skill
-for every read — base URL, search params, and field extraction all live there.
-This skill owns *which* resources to pull, *how* to order them, and the *output
-layout*.
+Get a patient id first. Given a name or a name plus DOB, resolve it with the
+**`fhir-data-access`** skill — see *Resolving a patient* there. Two candidates
+means you ask which one rather than guess.
 
-Get a patient id first. If given a name, resolve it with `fhir-data-access`
-(`Patient?name=`); if more than one patient matches, stop and list the
-candidates instead of guessing.
+With an id in hand, pull every domain in a single call:
 
-## What to pull (the recipe)
+```bash
+# path is the skill_dir from this skill's load result
+bash /sandbox/.hermes/skills/summarize-patient-chart/scripts/chart_pull.sh <patientId>
+```
 
-Fetch these for the patient, roughly in this priority. Pull only what's needed
-to fill the layout below — don't enumerate every resource.
-
-| Domain | Resource | Notes |
+| Domain | Resource | What the script returns |
 |---|---|---|
-| Allergies | `AllergyIntolerance` | Criticality and reaction first. |
-| Active problems | `Condition` | Prefer `clinical-status=active`. |
-| Current meds | `MedicationRequest` | Prefer `status=active`. |
-| Recent labs & vitals | `Observation` | `_sort=-date`; capture value, unit, date, and any interpretation flag (H/L/HH/LL/A). |
-| Recent visits | `Encounter` | `_sort=-date`, most recent handful. |
-| Immunizations | `Immunization` | Only if relevant or asked. |
+| Demographics | `Patient` | Name, **age computed locally**, sex, city. |
+| Allergies | `AllergyIntolerance` | Criticality and recorded reactions. |
+| Active problems | `Condition` | `clinical-status=active`, with onset. |
+| Current meds | `MedicationRequest` | `status=active`, with authored date. |
+| Recent labs & vitals | `Observation` | 25 most recent: value, unit, date, interpretation flag. |
+| Recent visits | `Encounter` | 5 most recent: type, start, status. |
 
-Compute age from `Patient.birthDate` as of today.
+Every line carries its resource id, so quote ids straight from the output.
+
+Anything outside that set — immunizations, procedures, a wider lab window, a
+specific coded search — comes from `fhir-data-access`. Don't re-fetch what the
+script already gave you.
 
 ## Ordering and flags
 
@@ -55,6 +56,11 @@ Lead with what matters (per the agent's rules):
 3. Attach the clinical **date** to every lab, vital, and med. Call out when the
    most recent value in a domain is old (e.g. `last A1c: 14 mo ago`) — never
    present a stale value as if it were current.
+
+Most observations in this dataset come back `flag=none recorded`. That's a field
+nobody filled in, not a normal result. Report the value with its date and say
+flags aren't recorded — don't turn a blank flag into "labs normal", and don't
+supply your own read of the number in place of the flag that isn't there.
 
 ## Report, don't diagnose
 

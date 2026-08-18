@@ -1894,35 +1894,24 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .bubble { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; }
   .msg.user .bubble { background: var(--panel2); }
   .bubble.err { border-color: var(--err); color: var(--err); }
+
+  /* steps: the agent's between-tool narration, kept out of the answer bubble */
+  .steps { margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+  .steps summary { cursor: pointer; user-select: none; list-style: none; }
+  .steps summary::-webkit-details-marker { display: none; }
+  .steps summary::before { content: '▸ '; }
+  .steps[open] summary::before { content: '▾ '; }
+  .steps .note { font-style: italic; white-space: pre-wrap; margin: 4px 0 4px 14px; }
+  .steps .tool { display: inline-flex; align-items: center; gap: 5px; margin: 3px 6px 3px 14px; padding: 2px 7px;
+                 border: 1px solid var(--border); border-radius: 6px; background: var(--panel2); font-size: 11px; }
+  .steps .tool.done { opacity: .5; }
+  .steps .tool .lbl { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cursor::after { content: '▋'; color: var(--accent); animation: blink 1s steps(2) infinite; margin-left: 1px; }
   @keyframes blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }
   .typing { display: inline-flex; gap: 4px; padding: 3px 0; }
   .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s infinite; }
   .typing i:nth-child(2){ animation-delay:.15s } .typing i:nth-child(3){ animation-delay:.3s }
   @keyframes bounce { 0%,80%,100%{transform:translateY(0);opacity:.4} 40%{transform:translateY(-4px);opacity:1} }
-  .agent-work { margin-bottom: 9px; border: 1px solid var(--border); border-radius: 8px;
-                background: var(--panel2); overflow: hidden; }
-  .agent-work .work-head { display: flex; align-items: center; gap: 8px; padding: 7px 9px;
-                           color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
-  .agent-work .work-caret { width: 9px; transition: transform .15s ease; }
-  .agent-work.collapsed .work-caret { transform: rotate(-90deg); }
-  .agent-work .work-dot { width: 7px; height: 7px; border-radius: 50%; flex: none;
-                          background: var(--accent); box-shadow: 0 0 7px var(--accent);
-                          animation: workpulse 1.2s ease-in-out infinite; }
-  .agent-work.done .work-dot { background: var(--tool); box-shadow: none; animation: none; }
-  .agent-work.failed .work-dot { background: var(--err); box-shadow: none; animation: none; }
-  @keyframes workpulse { 0%,100%{opacity:.35} 50%{opacity:1} }
-  .agent-work .work-title { flex: 1; }
-  .agent-work .work-list { border-top: 1px solid var(--border); padding: 5px 9px; }
-  .agent-work.collapsed .work-list { display: none; }
-  .work-item { display: grid; grid-template-columns: 14px minmax(90px,auto) 1fr; gap: 6px;
-               align-items: baseline; padding: 3px 0; font-size: 11.5px; }
-  .work-item .wi-state { color: var(--accent); }
-  .work-item.done .wi-state { color: var(--tool); }
-  .work-item.failed .wi-state { color: var(--err); }
-  .work-item .wi-name { color: var(--text); font-weight: 600; }
-  .work-item .wi-detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis;
-                          white-space: nowrap; font: 11px/1.4 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
 
   /* markdown */
   .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
@@ -1978,8 +1967,8 @@ CHAT_HTML = r"""<!DOCTYPE html>
 <main>
   <div class="thread" id="thread">
     <div class="empty" id="empty">
-      <h2>Chat with EHRClaw</h2>
-      <div>Ask about the patient records — reasoning status and tool calls appear here live, with full details in the <a href="/#traces" target="_top" style="color:var(--accent)">Traces</a> tab.</div>
+      <h2>Chat with CliniClaw</h2>
+      <div>Ask about the patient records — the agent's steps collapse above each reply; full traces are in the <a href="/#traces" target="_top" style="color:var(--accent)">Traces</a> tab.</div>
       <div class="suggest" id="suggest">
         <button>What can you do?</button>
         <button>How many patients are in the system?</button>
@@ -2068,7 +2057,7 @@ function addMessage(role, text) {
   col.style.flex = '1';
   const who = document.createElement('div');
   who.className = 'who';
-  who.textContent = role === 'user' ? 'you' : 'EHRClaw';
+  who.textContent = role === 'user' ? 'you' : 'CliniClaw';
   const bubble = document.createElement('div');
   bubble.className = 'bubble md';
   if (text != null) bubble.innerHTML = mdLite(text);
@@ -2080,132 +2069,66 @@ function addMessage(role, text) {
 }
 function scrollDown() { thread.scrollTop = thread.scrollHeight; }
 
-function activityDetail(ev) {
-  const d = ev && ev.data;
-  if (!d || typeof d !== 'object') return '';
-  if (d.command) return d.command.replace(/\s+/g, ' ').trim().slice(0, 180);
-  if (d.name) return String(d.name);
-  if (d.target) return String(d.target);
-  if (d.question) return String(d.question).replace(/\s+/g, ' ').trim().slice(0, 180);
-  return '';
-}
+// A turn arrives as: narration, tool call, narration, tool call, …, answer. Only
+// the text after the last tool call is the reply; everything earlier is the
+// agent talking through its steps, so it belongs in the collapsed steps block.
+function addAssistantTurn() {
+  emptyEl.style.display = 'none';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant';
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = 'H';
+  const col = document.createElement('div');
+  col.className = 'content';
+  col.style.flex = '1';
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = 'CliniClaw';
+  const steps = document.createElement('details');
+  steps.className = 'steps';
+  steps.hidden = true;
+  const summary = document.createElement('summary');
+  const stepBody = document.createElement('div');
+  steps.appendChild(summary);
+  steps.appendChild(stepBody);
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble md';
+  col.appendChild(who);
+  col.appendChild(steps);
+  col.appendChild(bubble);
+  wrap.appendChild(av);
+  wrap.appendChild(col);
+  thread.appendChild(wrap);
+  scrollDown();
 
-function createAgentWork(bubble) {
-  bubble.classList.remove('md');
-  bubble.innerHTML = '';
-  const root = document.createElement('div');
-  root.className = 'agent-work';
-  const head = document.createElement('div');
-  head.className = 'work-head';
-  head.innerHTML = '<span class="work-caret">▾</span><span class="work-dot"></span><span class="work-title">Reasoning…</span>';
-  const list = document.createElement('div');
-  list.className = 'work-list';
-  root.appendChild(head); root.appendChild(list);
-  const answer = document.createElement('div');
-  answer.className = 'md';
-  bubble.appendChild(root); bubble.appendChild(answer);
-  head.addEventListener('click', () => root.classList.toggle('collapsed'));
-
-  const started = performance.now();
-  const items = new Map();
-  let toolCount = 0;
-
-  function upsert(key, name, detail, state) {
-    let rec = items.get(key);
-    if (!rec) {
-      const row = document.createElement('div');
-      row.className = 'work-item';
-      row.innerHTML = '<span class="wi-state">●</span><span class="wi-name"></span><span class="wi-detail"></span>';
-      list.appendChild(row);
-      rec = { row, name: '', detail: '' };
-      items.set(key, rec);
-      if (key !== 'reasoning') toolCount++;
-    }
-    rec.name = name || rec.name;
-    rec.detail = detail || rec.detail;
-    rec.row.className = 'work-item ' + (state || 'running');
-    rec.row.querySelector('.wi-state').textContent = state === 'done' ? '✓' : state === 'failed' ? '!' : '●';
-    rec.row.querySelector('.wi-name').textContent = rec.name;
-    rec.row.querySelector('.wi-detail').textContent = rec.detail;
+  let count = 0;
+  const reveal = () => {
+    steps.hidden = false;
+    summary.textContent = ++count === 1 ? '1 step' : count + ' steps';
     scrollDown();
-  }
-
-  upsert('reasoning', 'Reasoning', 'planning the response', 'running');
+  };
   return {
-    answer,
-    upsertTool(key, name, detail, state) { upsert(key, name || 'tool', detail, state || 'running'); },
-    finishTool(key, failed) {
-      const rec = items.get(key);
-      if (rec) upsert(key, rec.name, rec.detail, failed ? 'failed' : 'done');
+    bubble,
+    note(text) {
+      if (!text.trim()) return null;
+      const d = document.createElement('div');
+      d.className = 'note';
+      d.textContent = text.trim();
+      stepBody.appendChild(d);
+      reveal();
+      return d;
     },
-    reasoningActive(detail) { upsert('reasoning', 'Reasoning', detail || 'planning the response', 'running'); },
-    answerStarted() { upsert('reasoning', 'Reasoning', 'response ready', 'done'); },
-    finish(status) {
-      const failed = status === 'failed';
-      for (const [key, rec] of items) {
-        if (rec.row.classList.contains('running'))
-          upsert(key, rec.name, rec.detail, failed ? 'failed' : 'done');
-      }
-      const secs = ((performance.now() - started) / 1000).toFixed(1);
-      root.classList.add(failed ? 'failed' : 'done');
-      root.querySelector('.work-title').textContent =
-        (failed ? 'Stopped' : 'Completed') + ' in ' + secs + 's' +
-        (toolCount ? ' · ' + toolCount + ' tool call' + (toolCount === 1 ? '' : 's') : '');
-      root.classList.add('collapsed');
+    tool(ev) {
+      const c = document.createElement('span');
+      c.className = 'tool';
+      c.innerHTML = (ev.emoji ? esc(ev.emoji) + ' ' : '') + '<b>' + esc(ev.tool || 'tool') + '</b>' +
+                    (ev.label ? ' <span class="lbl">' + esc(String(ev.label).replace(/\s+/g, ' ')) + '</span>' : '');
+      stepBody.appendChild(c);
+      reveal();
+      return c;
     },
   };
-}
-
-async function currentTraceSeq() {
-  try {
-    const r = await fetch('/api/events?since=2147483647', { cache: 'no-store' });
-    const d = await r.json();
-    return Number(d.seq || 0);
-  } catch (e) { return 0; }
-}
-
-function startTraceActivity(work, baselinePromise, userText) {
-  let stopped = false;
-  let turnId = null;
-  const pending = [];
-  const process = ev => {
-    const meta = ev.metadata || {};
-    if (turnId && meta.turn_id && meta.turn_id !== turnId) return;
-    if (ev.category === 'llm' && ev.kind === 'scope' && ev.scope_category === 'start') {
-      work.reasoningActive('planning and selecting tools');
-      return;
-    }
-    if (ev.category !== 'tool' || ev.kind !== 'scope') return;
-    const key = 'tool:' + (meta.tool_call_id || ev.uuid || ev._seq);
-    if (ev.scope_category === 'start')
-      work.upsertTool(key, ev.name || 'tool', activityDetail(ev), 'running');
-    else if (ev.scope_category === 'end')
-      work.finishTool(key, meta['otel.status_code'] && meta['otel.status_code'] !== 'OK');
-  };
-
-  (async () => {
-    let seq = await baselinePromise;
-    while (!stopped) {
-      try {
-        const r = await fetch('/api/events?since=' + seq, { cache: 'no-store' });
-        const d = await r.json();
-        seq = Number(d.seq || seq);
-        for (const ev of (d.events || [])) {
-          if (ev.kind === 'mark' && ev.name === 'hermes.turn.start') {
-            const msg = ev.data && ev.data.user_message;
-            if (String(msg || '').trim() === userText.trim()) {
-              turnId = ev.metadata && ev.metadata.turn_id;
-              while (pending.length) process(pending.shift());
-            }
-            continue;
-          }
-          if (turnId) process(ev); else pending.push(ev);
-        }
-      } catch (e) { /* traces are supplemental; chat streaming continues */ }
-      await new Promise(resolve => setTimeout(resolve, 650));
-    }
-  })();
-  return () => { stopped = true; };
 }
 
 function setStreaming(on) {
@@ -2223,17 +2146,42 @@ async function send() {
   messages.push({ role: 'user', content: text });
   addMessage('user', text);
 
-  const bubble = addMessage('assistant', null);
-  const work = createAgentWork(bubble);
-  const answer = work.answer;
-  answer.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  const turn = addAssistantTurn();
+  const bubble = turn.bubble;
+  const TYPING = '<span class="typing"><i></i><i></i><i></i></span>';
+  bubble.innerHTML = TYPING;
   setStreaming(true);
   controller = new AbortController();
-  const traceBaseline = currentTraceSeq();
-  const stopTraceActivity = startTraceActivity(work, traceBaseline, text);
 
-  let acc = '';
-  const streamedTools = new Map();
+  let seg = '';        // text since the last tool call
+  let lastNote = '';   // most recent narration, promoted if the turn ends on a tool call
+  let lastNoteEl = null;
+  const chips = new Map();
+
+  // A tool call means whatever was streaming was narration, not the answer.
+  const cut = () => {
+    if (seg.trim()) { lastNote = seg.trim(); lastNoteEl = turn.note(lastNote); }
+    seg = '';
+    bubble.classList.remove('cursor');
+    bubble.innerHTML = TYPING;
+  };
+
+  const settle = () => {
+    // Some models inline their reasoning in content rather than a separate field.
+    seg = seg.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g, (m, r) => { turn.note(r); return ''; })
+             .replace(/<think(?:ing)?>[\s\S]*$/, m => { turn.note(m.replace(/^<think(?:ing)?>/, '')); return ''; });
+    bubble.classList.remove('cursor');
+    let answer = seg.trim();
+    if (!answer && lastNote) {  // turn ended on a tool call — promote its narration
+      answer = lastNote;
+      if (lastNoteEl) lastNoteEl.remove();
+    }
+    if (answer) { bubble.innerHTML = mdLite(answer); messages.push({ role: 'assistant', content: answer }); }
+    else bubble.innerHTML = '<span style="color:var(--muted)">(no content returned)</span>';
+    scrollDown();
+    return answer;
+  };
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -2262,48 +2210,40 @@ async function send() {
         if (payload === '[DONE]') continue;
         try {
           const j = JSON.parse(payload);
-          const delta = j.choices && j.choices[0] && j.choices[0].delta;
-          if (delta && (delta.reasoning_content || delta.reasoning))
-            work.reasoningActive('model reasoning');
-          if (delta && Array.isArray(delta.tool_calls)) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index == null ? 0 : tc.index;
-              const rec = streamedTools.get(idx) || { id: '', name: '', args: '' };
-              if (tc.id) rec.id = tc.id;
-              const fn = tc.function || {};
-              if (fn.name) rec.name += fn.name;
-              if (fn.arguments) rec.args += fn.arguments;
-              streamedTools.set(idx, rec);
-              work.upsertTool('tool:' + (rec.id || ('stream-' + idx)), rec.name || 'tool', rec.args.slice(0, 180), 'running');
+          if (j.tool) {  // Hermes tool-activity event, not an OpenAI chunk
+            if (j.status === 'completed') {
+              const c = chips.get(j.toolCallId);
+              if (c) c.classList.add('done');
+            } else {
+              cut();
+              chips.set(j.toolCallId, turn.tool(j));
             }
+            continue;
           }
-          if (delta && delta.content) {
-            if (!acc) work.answerStarted();
-            acc += delta.content;
-            answer.innerHTML = mdLite(acc);
-            answer.classList.add('cursor');
+          const delta = j.choices && j.choices[0] && j.choices[0].delta;
+          if (!delta) continue;
+          if (delta.reasoning_content) turn.note(delta.reasoning_content);
+          if (delta.content) {
+            seg += delta.content;
+            bubble.innerHTML = mdLite(seg);
+            bubble.classList.add('cursor');
             scrollDown();
           }
         } catch (e) { /* ignore keep-alive / partial */ }
       }
     }
-    answer.classList.remove('cursor');
-    if (!acc.trim()) answer.innerHTML = '<span style="color:var(--muted)">(no content returned)</span>';
-    messages.push({ role: 'assistant', content: acc });
-    work.finish('done');
+    settle();
   } catch (err) {
-    answer.classList.remove('cursor');
     if (err.name === 'AbortError') {
-      if (acc.trim()) { answer.innerHTML = mdLite(acc) + '<div style="color:var(--muted);font-size:12px">⏹ stopped</div>';
-                        messages.push({ role: 'assistant', content: acc }); }
-      else { bubble.classList.add('err'); answer.textContent = '⏹ stopped'; }
+      const answer = settle();
+      if (answer) bubble.innerHTML += '<div style="color:var(--muted);font-size:12px">⏹ stopped</div>';
+      else { bubble.classList.add('err'); bubble.textContent = '⏹ stopped'; }
     } else {
+      bubble.classList.remove('cursor');
       bubble.classList.add('err');
-      answer.textContent = 'Error: ' + err.message;
+      bubble.textContent = 'Error: ' + err.message;
     }
-    work.finish('failed');
   } finally {
-    stopTraceActivity();
     setStreaming(false);
     controller = null;
     input.focus();

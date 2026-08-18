@@ -40,20 +40,3 @@ enabled = true
 
 [components.config.tool_parallelism]
 mode = "observe_only"
-
-[[components]]
-kind = "nemo_guardrails"
-enabled = true
-
-[components.config]
-version = 1
-mode = "local"
-codec = "openai_chat"
-input = true
-output = true
-config_path = "/sandbox/.nemo-relay/guardrails"
-
-# Local backend: nemo_relay spawns an in-sandbox python worker that imports
-# nemoguardrails and runs the self-check rails
-[components.config.local]
-python_executable = "/opt/hermes/.venv/bin/python"
