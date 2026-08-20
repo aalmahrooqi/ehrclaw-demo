@@ -17,18 +17,20 @@ Not this skill:
 - Screening many patients against trial criteria → use
   `clinical-trial-cohort-prescreener`.
 
-## One command pulls the chart
+## Two-step workflow
 
-Get a patient id first. Given a name or a name plus DOB, resolve it with the
-**`fhir-data-access`** skill — see *Resolving a patient* there. Two candidates
+**Step 1 — resolve the patient.** Given a name or name + DOB, use the
+**`fhir-data-access`** skill (see *Resolving a patient* there). Two candidates
 means you ask which one rather than guess.
 
-With an id in hand, pull every domain in a single call:
+**Step 2 — pull the chart.** With a confirmed patient id, run:
 
 ```bash
-# path is the skill_dir from this skill's load result
 bash /sandbox/.hermes/skills/summarize-patient-chart/scripts/chart_pull.sh <patientId>
 ```
+
+That's it. Don't replicate what the script does with separate curl calls — it
+already fetches every domain in the right order and pipes through Python inline.
 
 | Domain | Resource | What the script returns |
 |---|---|---|

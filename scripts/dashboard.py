@@ -25,6 +25,7 @@ import shlex
 import subprocess
 import threading
 import time
+import uuid
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,6 +62,7 @@ HERMES_MODEL = "hermes-agent"
 GATEWAY_TOKEN = ""           # bearer token for the Hermes agent API (discovered at startup)
 _TOKEN_LOCK = threading.Lock()
 _NEMOCLAW_COMMAND: list[str] | None = None
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 
 
 class TraceStore:
@@ -74,7 +76,8 @@ class TraceStore:
         self.status = "connecting"   # connecting | live | error
         self.error = ""
         self.files: dict[str, int] = {}   # path -> bytes consumed
-        self._file_counts: dict[str, int] = {}   # basename -> events seen
+        self._file_counts: dict[str, int] = {}   # virtual name -> events seen
+        self._file_first_seq: dict[str, int] = {}  # virtual name -> first _seq
 
     def add(self, event: dict) -> None:
         with self._lock:
@@ -82,9 +85,14 @@ class TraceStore:
             event["_seq"] = self._seq
             self._events.append(event)
             name = event.get("_file", "")
+            if name and name not in self._file_counts:
+                self._file_first_seq[name] = self._seq
             self._file_counts[name] = self._file_counts.get(name, 0) + 1
             if len(self._events) > self._max:
+                dropped = self._events[: len(self._events) - self._max]
                 self._events = self._events[-self._max :]
+                if dropped:
+                    self._rebuild_file_index_unlocked()
 
     def since(self, seq: int, file: str | None = None) -> tuple[list[dict], int]:
         with self._lock:
@@ -94,41 +102,49 @@ class TraceStore:
             ]
             return out, self._seq
 
-    def prune(self, present: set[str]) -> list[str]:
-        """Forget files (and their buffered events) no longer in the sandbox.
-
-        `present` is the set of basenames currently found in the atof dir.
-        Returns the basenames that were dropped.
-        """
+    def export_file(self, name: str) -> bytes:
+        """NDJSON for one virtual session file (original ATOF objects)."""
         with self._lock:
-            gone = {b for b in self._file_counts if b and b not in present}
-            if not gone:
-                return []
-            self._events = [e for e in self._events if e.get("_file") not in gone]
-            for base in gone:
-                self._file_counts.pop(base, None)
-            return sorted(gone)
+            lines = []
+            for event in self._events:
+                if event.get("_file") != name:
+                    continue
+                lines.append(json.dumps(
+                    {k: v for k, v in event.items() if not str(k).startswith("_")},
+                    ensure_ascii=False,
+                ))
+            return ("\n".join(lines) + "\n").encode() if lines else b""
+
+    def prune(self, present_sources: set[str]) -> list[str]:
+        """Drop events whose physical sandbox source file is gone."""
+        with self._lock:
+            before = {n for n in self._file_counts if n}
+            self._events = [
+                e for e in self._events
+                if (src := e.get("_source")) in present_sources or not src
+            ]
+            self._rebuild_file_index_unlocked()
+            return sorted(before - {n for n in self._file_counts if n})
+
+    def _rebuild_file_index_unlocked(self) -> None:
+        counts: dict[str, int] = {}
+        first: dict[str, int] = {}
+        for event in self._events:
+            name = event.get("_file") or ""
+            if not name:
+                continue
+            if name not in first:
+                first[name] = int(event.get("_seq") or 0)
+            counts[name] = counts.get(name, 0) + 1
+        self._file_counts = counts
+        self._file_first_seq = first
 
     def _file_list(self) -> list[dict]:
-        # Collect every known basename, then sort by the timestamp embedded in
-        # the filename (nemo-relay-events-YYYY-MM-DD-HH.MM.SS.jsonl), newest first.
-        names: set[str] = set()
-        for path in self.files:
-            base = path.rsplit("/", 1)[-1]
-            if base:
-                names.add(base)
-        for base in self._file_counts:
-            if base:
-                names.add(base)
-
-        def sort_key(name: str) -> tuple[int, str]:
-            m = re.search(r"(\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}\.\d{2})", name)
-            # Files with a parseable timestamp rank ahead of any that lack one;
-            # the timestamp string sorts chronologically as-is.
-            return (1, m.group(1)) if m else (0, name)
-
-        ordered = sorted(names, key=sort_key, reverse=True)
-        return [{"name": n, "count": self._file_counts.get(n, 0)} for n in ordered]
+        # One sidebar entry per Hermes/Relay session (not per process-wide
+        # ATOF jsonl). Newest session first.
+        names = [n for n in self._file_counts if n]
+        names.sort(key=lambda n: self._file_first_seq.get(n, 0), reverse=True)
+        return [{"name": n, "count": self._file_counts.get(n, 0)} for n in names]
 
     def snapshot_meta(self) -> dict:
         with self._lock:
@@ -144,6 +160,24 @@ class TraceStore:
 
 
 STORE = TraceStore()
+
+
+def _event_session_id(event: dict) -> str:
+    """Relay/Hermes session id on an ATOF event, if any."""
+    for blob in (event.get("metadata"), event.get("data")):
+        if not isinstance(blob, dict):
+            continue
+        sid = blob.get("session_id")
+        if isinstance(sid, str) and sid.strip() and "/" not in sid and ".." not in sid:
+            return sid.strip()
+    return ""
+
+
+def _session_file_name(session_id: str, source: str) -> str:
+    """Virtual jsonl name shown in the traces sidebar (one per session)."""
+    if session_id:
+        return f"{session_id}.jsonl"
+    return source or "unattributed.jsonl"
 
 
 def _mem_lines(content: str) -> list[str]:
@@ -532,6 +566,7 @@ def get_gateway_token(refresh: bool = False) -> str:
 def poll_loop() -> None:
     """Background worker: discover files, tail new bytes, parse JSON lines."""
     buffers: dict[str, bytes] = {}
+    last_sid: dict[str, str] = {}
 
     while True:
         try:
@@ -543,6 +578,7 @@ def poll_loop() -> None:
             present_paths = set(sizes)
             for stale in [p for p in buffers if p not in present_paths]:
                 buffers.pop(stale, None)
+                last_sid.pop(stale, None)
             STORE.prune({p.rsplit("/", 1)[-1] for p in present_paths})
 
             for path, size in sizes.items():
@@ -569,7 +605,12 @@ def poll_loop() -> None:
                         event = json.loads(raw.decode("utf-8", "replace"))
                     except json.JSONDecodeError:
                         continue
-                    event["_file"] = path.rsplit("/", 1)[-1]
+                    source = path.rsplit("/", 1)[-1]
+                    sid = _event_session_id(event) or last_sid.get(path, "")
+                    if sid:
+                        last_sid[path] = sid
+                    event["_source"] = source
+                    event["_file"] = _session_file_name(sid, source)
                     STORE.add(event)
 
                 STORE.files[path] = consumed + len(chunk)
@@ -823,20 +864,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
     def _download(self, name: str) -> None:
-        """Stream a raw .jsonl trace file out of the sandbox as an attachment."""
+        """Download one session's ATOF events as NDJSON."""
         known = {f["name"] for f in STORE.snapshot_meta()["files"]}
         if not name or "/" in name or ".." in name or name not in known:
             self._send(404, b"unknown file", "text/plain")
             return
-        try:
-            proc = _exec(["cat", f"{ATOF_DIR}/{name}"])
-            body = proc.stdout
-        except subprocess.TimeoutExpired:
-            self._send(504, b"sandbox read timed out", "text/plain")
-            return
-        except Exception as exc:  # noqa: BLE001
-            self._send(500, f"read failed: {exc}".encode(), "text/plain")
-            return
+        body = STORE.export_file(name)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.send_header("Content-Disposition", f'attachment; filename="{name}"')
@@ -849,24 +882,202 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/chat":
             self._proxy_chat()
+        elif parsed.path == "/api/chat/new":
+            self._new_chat_session()
         else:
             self._send(404, b"not found", "text/plain")
 
-    def _open_hermes(self, payload: bytes, token: str):
+    def _hermes_call(
+        self,
+        method: str,
+        path: str,
+        token: str,
+        payload: dict | None = None,
+        extra_headers: dict | None = None,
+        timeout: int = 15,
+    ):
+        headers = {"Authorization": f"Bearer {token}"}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode()
+            headers["Content-Type"] = "application/json"
+        if extra_headers:
+            headers.update({k: v for k, v in extra_headers.items() if v})
+        req = urllib.request.Request(
+            f"http://{HERMES_API_HOST}:{HERMES_API_PORT}{path}",
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        return urllib.request.urlopen(req, timeout=timeout)
+
+    def _open_hermes(self, payload: bytes, token: str, session_id: str = ""):
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        if session_id:
+            headers["X-Hermes-Session-Id"] = session_id
         req = urllib.request.Request(
             f"http://{HERMES_API_HOST}:{HERMES_API_PORT}/v1/chat/completions",
             data=payload,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         return urllib.request.urlopen(req, timeout=900)
 
+    @staticmethod
+    def _valid_session_id(value: object) -> str:
+        if not isinstance(value, str):
+            return ""
+        sid = value.strip()
+        return sid if _SESSION_ID_RE.fullmatch(sid) else ""
+
+    @staticmethod
+    def _parse_session_id(obj: object) -> str:
+        if not isinstance(obj, dict):
+            return ""
+        for key in ("id", "session_id", "sessionId"):
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        nested = obj.get("session")
+        if isinstance(nested, dict):
+            return Handler._parse_session_id(nested)
+        return ""
+
+    @staticmethod
+    def _upstream_session_id(upstream) -> str:
+        headers = getattr(upstream, "headers", None)
+        if headers is None:
+            return ""
+        return (
+            headers.get("X-Hermes-Session-Id")
+            or headers.get("X-Chat-ID")
+            or headers.get("x-hermes-session-id")
+            or ""
+        ).strip()
+
+    def _json_from_hermes(self, resp) -> dict:
+        raw = resp.read() if resp else b""
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw.decode("utf-8", "replace"))
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _latest_user_turn(messages: list) -> list:
+        """Return only the newest user message.
+
+        Hermes session continuity loads prior turns from SessionDB when
+        ``X-Hermes-Session-Id`` is set. Sending the full browser transcript
+        makes the API fingerprint the *first* user message instead, so a new
+        chat that repeats a prompt (or omits the header) stays on the old
+        Relay session and never emits ``hermes.session`` / ``on_session_start``.
+        """
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str) or content:
+                    return [{"role": "user", "content": content}]
+        last = messages[-1] if messages else {}
+        if isinstance(last, dict):
+            return [last]
+        return [{"role": "user", "content": str(last)}]
+
+    def _end_hermes_session(self, session_id: str, token: str) -> None:
+        """Best-effort close of the previous Hermes transcript (PATCH, then DELETE)."""
+        path = f"/api/sessions/{session_id}"
+        try:
+            resp = self._hermes_call(
+                "PATCH", path, token, payload={"end_reason": "session_reset"}, timeout=10,
+            )
+            resp.read()
+            resp.close()
+            return
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                try:
+                    token = get_gateway_token(refresh=True)
+                    resp = self._hermes_call(
+                        "PATCH", path, token, payload={"end_reason": "session_reset"}, timeout=10,
+                    )
+                    resp.read()
+                    resp.close()
+                    return
+                except Exception:  # noqa: BLE001
+                    pass
+            elif exc.code not in (404, 405):
+                try:
+                    exc.read()
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            resp = self._hermes_call("DELETE", path, token, timeout=10)
+            resp.read()
+            resp.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _create_hermes_session(self, token: str) -> str:
+        """Create an empty Hermes session; fall back to a fresh UUID."""
+        for attempt, tok in enumerate((token, None)):
+            use = tok or get_gateway_token(refresh=True)
+            try:
+                resp = self._hermes_call(
+                    "POST", "/api/sessions", use, payload={"source": "dashboard"}, timeout=10,
+                )
+                created = self._json_from_hermes(resp)
+                resp.close()
+                sid = self._valid_session_id(self._parse_session_id(created))
+                if sid:
+                    return sid
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401 and attempt == 0:
+                    try:
+                        exc.read()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+                try:
+                    exc.read()
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+            except Exception:  # noqa: BLE001
+                break
+        return str(uuid.uuid4())
+
+    def _new_chat_session(self) -> None:
+        """End the current Hermes session and start a new one."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length) if length else b"{}"
+            data = json.loads(body or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            data = {}
+        old = self._valid_session_id(data.get("session_id") if isinstance(data, dict) else "")
+        token = get_gateway_token()
+        if old:
+            self._end_hermes_session(old, token)
+        new_id = self._create_hermes_session(token)
+        self._send(200, json.dumps({"session_id": new_id}).encode(), "application/json")
+
     def _proxy_chat(self) -> None:
         """Proxy a chat turn to the Hermes agent API, streaming SSE back to the UI.
 
-        The browser sends {"messages": [...]}. We inject the agent model + the
-        gateway bearer token (never exposed to the client) and stream the
-        OpenAI-style SSE chunks straight through.
+        The browser sends {"messages": [...], "session_id": "..."}. We inject the
+        agent model, gateway bearer token, and X-Hermes-Session-Id so follow-up
+        turns stay on one Hermes transcript. Only the latest user message is
+        forwarded: with that header Hermes loads history from SessionDB, and an
+        empty DB on a new session id is what fires on_session_start → Relay's
+        hermes.session Agent scope. The session id is echoed back on the SSE
+        response so the UI can reuse it.
         """
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -880,20 +1091,23 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(messages, list) or not messages:
             self._send(400, b'{"error":"messages[] required"}', "application/json")
             return
+        token = get_gateway_token()
+        session_id = self._valid_session_id(data.get("session_id"))
+        if not session_id:
+            session_id = self._create_hermes_session(token)
 
         payload = json.dumps({
             "model": HERMES_MODEL,
-            "messages": messages,
+            "messages": self._latest_user_turn(messages),
             "stream": True,
         }).encode()
 
-        token = get_gateway_token()
         try:
-            upstream = self._open_hermes(payload, token)
+            upstream = self._open_hermes(payload, token, session_id)
         except urllib.error.HTTPError as e:
             if e.code == 401:  # token may have rotated — refresh once and retry
                 try:
-                    upstream = self._open_hermes(payload, get_gateway_token(refresh=True))
+                    upstream = self._open_hermes(payload, get_gateway_token(refresh=True), session_id)
                 except Exception as exc:  # noqa: BLE001
                     self._send(502, f'{{"error":"hermes auth failed: {exc}"}}'.encode(), "application/json")
                     return
@@ -908,10 +1122,14 @@ class Handler(BaseHTTPRequestHandler):
             }).encode(), "application/json")
             return
 
+        echoed = self._upstream_session_id(upstream) or session_id
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Accel-Buffering", "no")
+        if echoed:
+            self.send_header("X-Hermes-Session-Id", echoed)
+            self.send_header("Access-Control-Expose-Headers", "X-Hermes-Session-Id")
         self.end_headers()
         try:
             while True:
@@ -1250,9 +1468,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
 </header>
 <div class="layout">
   <aside class="sidebar">
-    <div class="sb-head">Trace files</div>
+    <div class="sb-head">Sessions</div>
     <div class="filelist" id="filelist">
-      <div class="empty-files">scanning sandbox…</div>
+      <div class="empty-files">waiting for a session…</div>
     </div>
   </aside>
   <main>
@@ -1270,7 +1488,8 @@ const srcEl = document.getElementById('src');
 const filelistEl = document.getElementById('filelist');
 
 let sinceSeq = 0;
-let selectedFile = null;   // set to the newest file after initial discovery
+let selectedFile = null;   // virtual session jsonl (one per Hermes session)
+let followLatest = true;   // jump to a new session unless the user pinned one
 let knownFiles = "";       // signature to avoid needless re-render
 const active = { agent: true, llm: true, tool: true, mark: true };
 const openScopes = {};     // uuid -> { el, start }
@@ -1641,7 +1860,7 @@ function metaDetails(s, e) {
 function displayName(s) {
   if (s.kind === 'mark') return (s.name || '').replace('hermes.', '');
   if (s.category === 'llm') return 'LLM';
-  if (s.category === 'agent') return 'session';
+  if (s.category === 'agent' || s.name === 'hermes.session') return 'session start';
   return s.name || '';
 }
 function clip(str, n) { str = String(str || '').replace(/\s+/g, ' ').trim(); return str.length > n ? str.slice(0, n) + '…' : str; }
@@ -1650,7 +1869,10 @@ function summarize(s, e) {
   if (s.name === 'hermes.turn.start') return '▶ ' + clip(d && d.user_message, 160);
   if (s.name === 'hermes.turn.end') return '■ ' + clip(d && d.assistant_response, 160);
   if (s.name === 'hermes.session.end') return 'session ended';
-  if (s.category === 'agent') return clip(s.name, 60);
+  if (s.name === 'hermes.session' || s.category === 'agent') {
+    const sid = (s.metadata && s.metadata.session_id) || (s.data && s.data.session_id) || s.name;
+    return 'new session ' + clip(sid, 24);
+  }
   if (s.category === 'tool' && s.name === 'terminal') return clip(d && d.command, 160);
   if (s.category === 'tool' && s.name === 'clarify') return clip(d && d.question, 160);
   if (s.category === 'tool' && s.name === 'skill_view') return 'view skill: ' + ((d && d.name) || '');
@@ -1727,10 +1949,14 @@ function handleEvent(ev) {
 }
 
 /* ------------------------------------------------------ file browser */
-function selectFile(name) {
-  if (selectedFile === name) return;
+function selectFile(name, pin) {
+  if (selectedFile === name) {
+    if (pin) followLatest = false;
+    return;
+  }
   gen++;
   selectedFile = name;
+  followLatest = !pin;
   sinceSeq = 0;
   for (const k in openScopes) delete openScopes[k];
   stream.innerHTML = '';
@@ -1743,7 +1969,7 @@ function renderFileList(files) {
   if (sig === knownFiles) { renderFileSelection(); return; }
   knownFiles = sig;
   let html = '';
-  if (!files.length) html = '<div class="empty-files">no .jsonl files found</div>';
+  if (!files.length) html = '<div class="empty-files">no sessions yet</div>';
   for (const f of files) {
     html += '<div class="file' + (selectedFile === f.name ? ' sel' : '') + '" data-file="' + esc(f.name) + '">' +
             '<span class="fname" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
@@ -1756,7 +1982,7 @@ function renderFileList(files) {
   }
   filelistEl.innerHTML = html;
   filelistEl.querySelectorAll('.file').forEach(e =>
-    e.addEventListener('click', () => selectFile(e.dataset.file)));
+    e.addEventListener('click', () => selectFile(e.dataset.file, true)));
   filelistEl.querySelectorAll('.fdl').forEach(a =>
     a.addEventListener('click', ev => ev.stopPropagation()));
 }
@@ -1806,8 +2032,14 @@ async function pollOnce() {
   statusText.textContent = data.status === 'error' ? ('error: ' + (data.error || '')) : data.status;
   const files = data.files || [];
   const present = new Set(files.map(f => f.name));
+  const newest = files.length ? files[0].name : null;
+  if (followLatest && newest && selectedFile !== newest) {
+    selectFile(newest, false);
+    renderFileList(files);
+    return;
+  }
   if (!selectedFile || !present.has(selectedFile)) {
-    selectFile(files.length ? files[0].name : null);
+    selectFile(newest, false);
     renderFileList(files);
     return;
   }
@@ -1963,6 +2195,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="newChat">new chat</button>
+  <span class="sub" id="sessionLabel" title="Hermes session"></span>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
 </header>
 <main>
@@ -1994,8 +2227,16 @@ const newChatBtn = document.getElementById('newChat');
 document.getElementById('sub').textContent = 'hermes-agent';
 
 let messages = [];          // {role, content} conversation history
+let sessionId = null;       // Hermes X-Hermes-Session-Id for this thread
 let streaming = false;
 let controller = null;
+
+function setSession(id) {
+  sessionId = id || null;
+  const el = document.getElementById('sessionLabel');
+  if (!el) return;
+  el.textContent = sessionId ? ('session ' + sessionId.slice(0, 8)) : '';
+}
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function mdLite(text) {
@@ -2208,7 +2449,7 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, session_id: sessionId }),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -2216,6 +2457,8 @@ async function send() {
       try { detail = (await res.json()).error || (await res.text()); } catch (e) {}
       throw new Error(detail || ('HTTP ' + res.status));
     }
+    const sid = res.headers.get('X-Hermes-Session-Id') || res.headers.get('X-Chat-ID');
+    if (sid) setSession(sid);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
@@ -2284,13 +2527,31 @@ input.addEventListener('input', () => { autosize(); if (!streaming) sendBtn.disa
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
-newChatBtn.addEventListener('click', () => {
+newChatBtn.addEventListener('click', async () => {
   if (streaming) stop();
+  newChatBtn.disabled = true;
+  try {
+    const res = await fetch('/api/chat/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setSession(data.session_id || null);
+  } catch (e) {
+    setSession(null);
+  }
   messages = [];
   thread.querySelectorAll('.msg').forEach(m => m.remove());
   emptyEl.style.display = '';
+  newChatBtn.disabled = false;
   input.focus();
 });
+fetch('/api/chat/new', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({}),
+}).then(r => r.json()).then(data => { if (data.session_id) setSession(data.session_id); }).catch(() => {});
 document.querySelectorAll('#suggest button').forEach(b =>
   b.addEventListener('click', () => { input.value = b.textContent; autosize(); sendBtn.disabled = false; send(); }));
 

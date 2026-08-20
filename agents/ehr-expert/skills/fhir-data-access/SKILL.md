@@ -57,15 +57,38 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 
 ## Resolving a patient
 
-Given a full identifier, use it: `birthdate=` and `given=`/`family=` together are
-the cheapest unique match. Given only a first name, resolve it before reading
-anything else — one name is rarely one patient.
+> **Never query on a value you can't read.** Telemetry and dashboard views mask
+> dates as `**********`, but that's the display layer — not your input. A DOB the
+> clinician gives you arrives intact. If you see `**********` in a parameter you're
+> about to send, drop that parameter entirely and search on what you can name.
+> `birthdate=**********` returns `total: 0` and that zero tells you nothing about
+> whether the patient is on file.
 
-Dates are masked in the trace and dashboard views (`**********`), but that's the
-telemetry sink, not your input: a DOB the clinician gives you arrives intact and
-is safe to query on.
+Given a full identifier, `birthdate=` and `given=`/`family=` together are the
+cheapest unique match — one curl, one result. Given only a name, resolve it
+before reading anything else — one name is rarely one patient.
 
 ```bash
+# Best case: name + DOB in a single call
+curl -s -H 'Accept: application/fhir+json' \
+  'http://host.openshell.internal:8081/fhir/Patient?family=Doyle&birthdate=1985-04-12&_count=50' | python3 -c "
+import sys, json
+from datetime import date
+b = json.load(sys.stdin)
+print('candidates:', b.get('total'))
+for e in b.get('entry', []):
+    p = e['resource']
+    n = (p.get('name') or [{}])[0]
+    city = (p.get('address') or [{}])[0].get('city')
+    dob, age = p.get('birthDate'), '?'
+    if dob:
+        y, m, d = (int(x) for x in dob.split('-')[:3])
+        t = date.today()
+        age = t.year - y - ((t.month, t.day) < (m, d))
+    print(p['id'], n.get('family'), n.get('given'), f'age={age}y', p.get('gender'), city)
+"
+
+# Fallback: name only (if DOB was not given or not readable)
 curl -s -H 'Accept: application/fhir+json' \
   'http://host.openshell.internal:8081/fhir/Patient?given=Paul&_count=50' | python3 -c "
 import sys, json
@@ -85,9 +108,6 @@ for e in b.get('entry', []):
 "
 ```
 
-- Never put a value you can't read in a parameter. `birthdate=**********` or a
-  literal `<id>` comes back `total: 0`, and that zero says nothing about whether
-  the patient is on file. Drop the field and search on what you can name.
 - Derive age in the shell, as above. The chart header wants an age, and the shell
   does date math more reliably than you do.
 - Two or more matches: list the candidates with their ids and ask which one.
@@ -151,7 +171,8 @@ broadly and filter the returned `code.coding` client-side.
 
 ## Extracting fields
 
-Pipe responses through `python3` rather than parsing by eye:
+Pipe responses through `python3 -c` inline — never write a temp script file just
+to run it once:
 
 ```bash
 curl -s 'http://host.openshell.internal:8081/fhir/Patient?_count=20' | python3 -c "
