@@ -19,6 +19,10 @@ Not this skill:
 
 ## Two-step workflow
 
+> **Load `fhir-data-access` before this skill.** You need a confirmed patient id
+> before this skill is useful — load and use `fhir-data-access` first to resolve
+> the patient, then come back here.
+
 **Step 1 — resolve the patient.** Given a name or name + DOB, use the
 **`fhir-data-access`** skill (see *Resolving a patient* there). Two candidates
 means you ask which one rather than guess.

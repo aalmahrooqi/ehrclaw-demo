@@ -22,3 +22,7 @@ credentials.json
 
 # Data
 data/
+
+# Agent-generated scratch files
+parse_*.py
+tmp/

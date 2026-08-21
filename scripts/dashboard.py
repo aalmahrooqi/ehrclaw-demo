@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import threading
 import time
@@ -1132,16 +1133,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Expose-Headers", "X-Hermes-Session-Id")
         self.end_headers()
         try:
-            while True:
-                chunk = upstream.read(512)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            self._pipe_sse(upstream)
         except (BrokenPipeError, ConnectionResetError):
             pass  # client navigated away / hit stop
         finally:
             upstream.close()
+
+    @staticmethod
+    def _tcp_nodelay(resp) -> None:
+        """Disable Nagle so small SSE frames are not delayed on the Hermes socket."""
+        try:
+            fp = getattr(resp, "fp", None)
+            raw = getattr(fp, "raw", None)
+            sock = getattr(raw, "_sock", None)
+            if sock is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except (AttributeError, OSError):
+            pass
+
+    def _pipe_sse(self, upstream) -> None:
+        """Forward Hermes SSE bytes as they arrive.
+
+        ``HTTPResponse.read(n)`` fills urllib's 8 KiB BufferedReader first, so
+        tokens arrive in dumps. ``read1`` issues at most one underlying recv.
+        """
+        self._tcp_nodelay(upstream)
+        read1 = getattr(upstream, "read1", None)
+        while True:
+            chunk = read1(256) if callable(read1) else upstream.read(256)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
 
 
 SHELL_HTML = r"""<!DOCTYPE html>
@@ -1149,7 +1172,7 @@ SHELL_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Hermes Health</title>
+<title>CliniClaw</title>
 <style>
   :root {
     --bg: #0b0e14; --panel: #131722; --panel2: #1a2030; --border: #232a3b;
@@ -1186,7 +1209,7 @@ SHELL_HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <div class="topbar">
-  <div class="brand"><span class="dot"></span> Hermes Health</div>
+  <div class="brand"><span class="dot"></span> CliniClaw</div>
   <nav class="tabs" id="tabs">
     <div class="tab" data-view="dashboard">dashboard</div>
     <div class="tab" data-view="chat">chat</div>
@@ -2420,9 +2443,49 @@ async function send() {
   let lastNote = '';   // most recent narration, promoted if the turn ends on a tool call
   let lastNoteEl = null;
   const chips = new Map();
+  // Tokens often arrive in TCP-sized dumps. Queue them and drip onto the page
+  // so a 10-word packet does not paint as a single jump.
+  let pending = '';
+  let pumpId = 0;
+
+  const paint = () => {
+    if (!seg) { bubble.innerHTML = TYPING; bubble.classList.remove('cursor'); }
+    else { bubble.innerHTML = mdLite(seg); bubble.classList.add('cursor'); }
+    scrollDown();
+  };
+
+  const drainPending = (all) => {
+    if (!pending) return;
+    if (all) { seg += pending; pending = ''; return; }
+    // Empty the current queue over ~12 frames (~200ms), never slower than
+    // 3 chars/frame so a long catch-up after a tool call does not crawl.
+    const n = pending.length <= 3 ? pending.length
+            : Math.max(3, Math.min(24, Math.ceil(pending.length / 12)));
+    seg += pending.slice(0, n);
+    pending = pending.slice(n);
+  };
+
+  const pump = () => {
+    pumpId = 0;
+    drainPending(false);
+    paint();
+    if (pending) pumpId = requestAnimationFrame(pump);
+  };
+
+  const enqueue = (text) => {
+    if (!text) return;
+    pending += text;
+    if (!pumpId) pumpId = requestAnimationFrame(pump);
+  };
+
+  const flushPending = () => {
+    if (pumpId) { cancelAnimationFrame(pumpId); pumpId = 0; }
+    drainPending(true);
+  };
 
   // A tool call means whatever was streaming was narration, not the answer.
   const cut = () => {
+    flushPending();
     if (seg.trim()) { lastNote = seg.trim(); lastNoteEl = turn.note(lastNote); }
     seg = '';
     bubble.classList.remove('cursor');
@@ -2430,6 +2493,7 @@ async function send() {
   };
 
   const settle = () => {
+    flushPending();
     // Some models inline their reasoning in content rather than a separate field.
     seg = seg.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g, (m, r) => { turn.note(r); return ''; })
              .replace(/<think(?:ing)?>[\s\S]*$/, m => { turn.note(m.replace(/^<think(?:ing)?>/, '')); return ''; });
@@ -2488,17 +2552,13 @@ async function send() {
           const delta = j.choices && j.choices[0] && j.choices[0].delta;
           if (!delta) continue;
           if (delta.reasoning_content) turn.note(delta.reasoning_content);
-          if (delta.content) {
-            seg += delta.content;
-            bubble.innerHTML = mdLite(seg);
-            bubble.classList.add('cursor');
-            scrollDown();
-          }
+          if (delta.content) enqueue(delta.content);
         } catch (e) { /* ignore keep-alive / partial */ }
       }
     }
     settle();
   } catch (err) {
+    if (pumpId) { cancelAnimationFrame(pumpId); pumpId = 0; }
     if (err.name === 'AbortError') {
       const answer = settle();
       if (answer) bubble.innerHTML += '<div style="color:var(--muted);font-size:12px">⏹ stopped</div>';

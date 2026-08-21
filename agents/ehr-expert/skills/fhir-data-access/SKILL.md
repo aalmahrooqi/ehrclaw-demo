@@ -57,55 +57,26 @@ curl -s 'http://host.openshell.internal:8081/fhir/Encounter?patient=<patientId>'
 
 ## Resolving a patient
 
-> **Never query on a value you can't read.** Telemetry and dashboard views mask
-> dates as `**********`, but that's the display layer — not your input. A DOB the
-> clinician gives you arrives intact. If you see `**********` in a parameter you're
-> about to send, drop that parameter entirely and search on what you can name.
-> `birthdate=**********` returns `total: 0` and that zero tells you nothing about
-> whether the patient is on file.
+> **Never query on a value you can't read.** DOBs may be masked as `**********`
+> both in telemetry views AND in what you receive as input (the platform redacts
+> them before they reach you). If the DOB in your context is `**********`, drop it
+> entirely and search by name alone. `birthdate=**********` returns `total: 0` and
+> that zero tells you nothing about whether the patient is on file.
 
 Given a full identifier, `birthdate=` and `given=`/`family=` together are the
 cheapest unique match — one curl, one result. Given only a name, resolve it
 before reading anything else — one name is rarely one patient.
 
 ```bash
-# Best case: name + DOB in a single call
-curl -s -H 'Accept: application/fhir+json' \
-  'http://host.openshell.internal:8081/fhir/Patient?family=Doyle&birthdate=1985-04-12&_count=50' | python3 -c "
-import sys, json
-from datetime import date
-b = json.load(sys.stdin)
-print('candidates:', b.get('total'))
-for e in b.get('entry', []):
-    p = e['resource']
-    n = (p.get('name') or [{}])[0]
-    city = (p.get('address') or [{}])[0].get('city')
-    dob, age = p.get('birthDate'), '?'
-    if dob:
-        y, m, d = (int(x) for x in dob.split('-')[:3])
-        t = date.today()
-        age = t.year - y - ((t.month, t.day) < (m, d))
-    print(p['id'], n.get('family'), n.get('given'), f'age={age}y', p.get('gender'), city)
-"
+FMT=/sandbox/.hermes/skills/fhir-data-access/scripts/fhir_format.py
 
-# Fallback: name only (if DOB was not given or not readable)
+# If DOB is readable: name + DOB in one call (cheapest unique match)
 curl -s -H 'Accept: application/fhir+json' \
-  'http://host.openshell.internal:8081/fhir/Patient?given=Paul&_count=50' | python3 -c "
-import sys, json
-from datetime import date
-b = json.load(sys.stdin)
-print('candidates:', b.get('total'))
-for e in b.get('entry', []):
-    p = e['resource']
-    n = (p.get('name') or [{}])[0]
-    city = (p.get('address') or [{}])[0].get('city')
-    dob, age = p.get('birthDate'), '?'
-    if dob:
-        y, m, d = (int(x) for x in dob.split('-')[:3])
-        t = date.today()
-        age = t.year - y - ((t.month, t.day) < (m, d))
-    print(p['id'], n.get('family'), n.get('given'), f'age={age}y', p.get('gender'), city)
-"
+  'http://host.openshell.internal:8081/fhir/Patient?family=Doyle&birthdate=1985-04-12&_count=50' | python3 "$FMT"
+
+# If DOB is masked (**********) or absent: name only, then pick from candidates
+curl -s -H 'Accept: application/fhir+json' \
+  'http://host.openshell.internal:8081/fhir/Patient?given=Paul&_count=50' | python3 "$FMT"
 ```
 
 - Derive age in the shell, as above. The chart header wants an age, and the shell
@@ -171,19 +142,23 @@ broadly and filter the returned `code.coding` client-side.
 
 ## Extracting fields
 
-Pipe responses through `python3 -c` inline — never write a temp script file just
-to run it once:
+A shared formatter is available for any FHIR bundle or single resource. Use it
+instead of writing your own parser:
 
 ```bash
-curl -s 'http://host.openshell.internal:8081/fhir/Patient?_count=20' | python3 -c "
-import sys, json
-b = json.load(sys.stdin)
-for e in b.get('entry', []):
-    p = e['resource']
-    name = p.get('name', [{}])[0]
-    print(p['id'], name.get('family'), name.get('given'))
-"
+FMT=/sandbox/.hermes/skills/fhir-data-access/scripts/fhir_format.py
+
+curl -s 'http://host.openshell.internal:8081/fhir/Patient?family=Doyle' | python3 "$FMT"
+curl -s 'http://host.openshell.internal:8081/fhir/Patient/66453'        | python3 "$FMT"
+curl -s 'http://host.openshell.internal:8081/fhir/Observation?patient=66453&_sort=-date&_count=10' | python3 "$FMT"
 ```
+
+The formatter handles Patient, AllergyIntolerance, Condition, MedicationRequest,
+Observation, and Encounter — printing one line per entry with the resource id,
+key fields, and computed age for patients. Unknown types fall back to `id | ResourceType`.
+
+Only drop to an inline `python3 -c` one-liner if you need a field the formatter
+doesn't expose. Never write a temp script file.
 
 ## Tips
 
