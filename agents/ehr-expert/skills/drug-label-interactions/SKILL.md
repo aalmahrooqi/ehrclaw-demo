@@ -1,6 +1,6 @@
 ---
 name: drug-label-interactions
-description: Retrieve openFDA drug label information for one known RxNorm RxCUI and summarize the drug interaction information contained in that label. Use when given a single RxCUI and asked what interactions, warnings, contraindicated drugs, or interaction-related label text openFDA reports for that drug.
+description: Fetch one drug's openFDA label and summarize interaction-related text (drug_interactions, boxed warnings, contraindications, warnings). Use when the user asks about FDA/openFDA labeling, interactions, contraindications, boxed warnings, or whether a named drug is mentioned against a patient's current meds. A free-text drug name is enough — resolve it to an RxCUI with rxnorm-resolve-rxcui first if one is not already known. This is a single-label lookup, not a pairwise interaction checker, and it does not decide whether a combination is safe.
 ---
 
 # Drug Label Interactions
@@ -83,7 +83,6 @@ Status: Interaction label text found
 
 Label:
 - Brand/generic: [from openfda fields]
-- Set ID: [set_id]
 - Effective time: [effective_time]
 
 Interaction-related sections:

@@ -31,7 +31,25 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
+
+def _assets_dir() -> Path:
+    here = Path(__file__).resolve().parent
+    for candidate in (here / "assets", here.parent / "assets"):
+        if candidate.is_dir():
+            return candidate
+    return here / "assets"
+
+
+ASSETS_DIR = _assets_dir()
+ASSET_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
 
 # ---------------------------------------------------------------------------
 # Config (overridable via CLI flags)
@@ -838,6 +856,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, html.encode(), "text/html; charset=utf-8")
         elif parsed.path == "/dashboard":
             self._send(200, DASHBOARD_HTML.encode(), "text/html; charset=utf-8")
+        elif parsed.path == "/about":
+            self._send(200, ABOUT_HTML.encode(), "text/html; charset=utf-8")
+        elif parsed.path.startswith("/assets/"):
+            self._serve_asset(parsed.path)
         elif parsed.path == "/api/memories":
             self._send(200, json.dumps(MEMORY_STORE.snapshot()).encode(), "application/json")
         elif parsed.path == "/api/skills":
@@ -863,6 +885,30 @@ class Handler(BaseHTTPRequestHandler):
             self._download(qs.get("file", [""])[0])
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _serve_asset(self, path: str) -> None:
+        """Serve a file from ASSETS_DIR. Path is /assets/<filename>."""
+        name = unquote(path.removeprefix("/assets/")).lstrip("/")
+        if not name or "/" in name or name.startswith(".") or ".." in name:
+            self._send(404, b"not found", "text/plain")
+            return
+        target = (ASSETS_DIR / name).resolve()
+        try:
+            target.relative_to(ASSETS_DIR.resolve())
+        except ValueError:
+            self._send(404, b"not found", "text/plain")
+            return
+        ctype = ASSET_TYPES.get(target.suffix.lower())
+        if ctype is None or not target.is_file():
+            self._send(404, b"not found", "text/plain")
+            return
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _download(self, name: str) -> None:
         """Download one session's ATOF events as NDJSON."""
@@ -1172,7 +1218,8 @@ SHELL_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CliniClaw</title>
+<title>🩺 CliniClaw</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237c5cff'/%3E%3Cpath fill='%23fff' d='M14 6h4v8h8v4h-8v8h-4v-8H6v-4h8z'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #0b0e14; --panel: #131722; --panel2: #1a2030; --border: #232a3b;
@@ -1211,15 +1258,17 @@ SHELL_HTML = r"""<!DOCTYPE html>
 <div class="topbar">
   <div class="brand"><span class="dot"></span> CliniClaw</div>
   <nav class="tabs" id="tabs">
-    <div class="tab" data-view="dashboard">dashboard</div>
-    <div class="tab" data-view="chat">chat</div>
-    <div class="tab" data-view="hermes">hermes</div>
-    <div class="tab" data-view="traces">traces</div>
+    <div class="tab" data-view="about">ℹ️ about</div>
+    <div class="tab" data-view="dashboard">📊 dashboard</div>
+    <div class="tab" data-view="chat">💬 chat</div>
+    <div class="tab" data-view="hermes">⚕ hermes</div>
+    <div class="tab" data-view="traces">📡 traces</div>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
 </div>
 <div class="views" id="views">
+  <div class="view" data-view="about"><iframe data-src="/about?embed=1" title="About"></iframe></div>
   <div class="view" data-view="dashboard"><iframe data-src="/dashboard?embed=1" title="Dashboard"></iframe></div>
   <div class="view" data-view="chat"><iframe data-src="/chat?embed=1" title="Chat"
         allow="clipboard-read; clipboard-write; microphone"></iframe></div>
@@ -1228,13 +1277,13 @@ SHELL_HTML = r"""<!DOCTYPE html>
   <div class="view" data-view="traces"><iframe data-src="/traces?embed=1" title="Traces"></iframe></div>
 </div>
 <script>
-const TABS = ['dashboard', 'chat', 'hermes', 'traces'];
+const TABS = ['about', 'dashboard', 'chat', 'hermes', 'traces'];
 
 // Keep-alive routing: every view stays mounted once loaded, we only toggle
 // visibility, so each iframe preserves its own state (chat history/stream,
 // trace scroll & filters, the native dashboard session).
 function activate(name) {
-  if (!TABS.includes(name)) name = 'traces';
+  if (!TABS.includes(name)) name = 'about';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
   document.querySelectorAll('.view').forEach(v => {
     const on = v.dataset.view === name;
@@ -1268,7 +1317,7 @@ themeBtn.addEventListener('click', () => {
 });
 window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
 
-activate(location.hash.slice(1) || 'traces');
+activate(location.hash.slice(1) || 'about');
 </script>
 </body>
 </html>
@@ -1471,10 +1520,11 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <header>
   <h1>ATOF Trace <span class="sub" id="src"></span></h1>
   <nav class="nav">
-    <a class="chip navlink" href="/dashboard">dashboard</a>
-    <a class="chip navlink" href="/chat">chat</a>
-    <a class="chip navlink" href="/hermes">hermes</a>
-    <a class="chip navlink active" href="/">traces</a>
+    <a class="chip navlink" href="/about">ℹ️ about</a>
+    <a class="chip navlink" href="/dashboard">📊 dashboard</a>
+    <a class="chip navlink" href="/chat">💬 chat</a>
+    <a class="chip navlink" href="/hermes">⚕ hermes</a>
+    <a class="chip navlink active" href="/">📡 traces</a>
   </nav>
   <span class="pill"><span class="dot" id="statusDot"></span><span id="statusText">connecting</span></span>
   <span class="pill" id="countPill">0 events</span>
@@ -2211,10 +2261,11 @@ CHAT_HTML = r"""<!DOCTYPE html>
 <header>
   <h1>Hermes Chat <span class="sub" id="sub"></span></h1>
   <nav class="nav">
-    <a class="chip navlink" href="/dashboard">dashboard</a>
-    <a class="chip navlink active" href="/chat">chat</a>
-    <a class="chip navlink" href="/hermes">hermes</a>
-    <a class="chip navlink" href="/">traces</a>
+    <a class="chip navlink" href="/about">ℹ️ about</a>
+    <a class="chip navlink" href="/dashboard">📊 dashboard</a>
+    <a class="chip navlink active" href="/chat">💬 chat</a>
+    <a class="chip navlink" href="/hermes">⚕ hermes</a>
+    <a class="chip navlink" href="/">📡 traces</a>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="newChat">new chat</button>
@@ -2691,10 +2742,11 @@ HERMES_HTML = r"""<!DOCTYPE html>
 <header>
   <h1>Hermes Dashboard <span class="sub" id="sub"></span></h1>
   <nav class="nav">
-    <a class="chip navlink" href="/dashboard">dashboard</a>
-    <a class="chip navlink" href="/chat">chat</a>
-    <a class="chip navlink active" href="/hermes">hermes</a>
-    <a class="chip navlink" href="/">traces</a>
+    <a class="chip navlink" href="/about">ℹ️ about</a>
+    <a class="chip navlink" href="/dashboard">📊 dashboard</a>
+    <a class="chip navlink" href="/chat">💬 chat</a>
+    <a class="chip navlink active" href="/hermes">⚕ hermes</a>
+    <a class="chip navlink" href="/">📡 traces</a>
   </nav>
   <div class="spacer"></div>
   <a class="chip" id="openTab" href="#" target="_blank" rel="noopener">open in new tab ↗</a>
@@ -2876,10 +2928,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <header>
   <h1>Dashboard</h1>
   <nav class="nav">
-    <a class="chip navlink active" href="/dashboard">dashboard</a>
-    <a class="chip navlink" href="/chat">chat</a>
-    <a class="chip navlink" href="/hermes">hermes</a>
-    <a class="chip navlink" href="/">traces</a>
+    <a class="chip navlink" href="/about">ℹ️ about</a>
+    <a class="chip navlink active" href="/dashboard">📊 dashboard</a>
+    <a class="chip navlink" href="/chat">💬 chat</a>
+    <a class="chip navlink" href="/hermes">⚕ hermes</a>
+    <a class="chip navlink" href="/">📡 traces</a>
   </nav>
   <div class="spacer"></div>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
@@ -3148,6 +3201,189 @@ tick();
 """
 
 
+ABOUT_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>About CliniClaw</title>
+<script>if(new URLSearchParams(location.search).has('embed'))document.documentElement.classList.add('embed');</script>
+<style>html.embed header .nav,html.embed header #themeToggle{display:none!important}</style>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131722; --panel2: #1a2030; --border: #232a3b;
+    --text: #d7dce5; --muted: #8b93a7; --accent: #7c5cff; --ok: #2ec07a;
+    --header-a: #111623; --header-b: #0b0e14;
+  }
+  body.light {
+    --bg: #f5f7fa; --panel: #ffffff; --panel2: #eef1f6; --border: #d9dee8;
+    --text: #1b2330; --muted: #5b647a; --accent: #6b46ff; --ok: #1a9d6b;
+    --header-a: #ffffff; --header-b: #eef1f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
+  header { flex: none; background: linear-gradient(180deg,var(--header-a),var(--header-b));
+           border-bottom: 1px solid var(--border); padding: 12px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+  .spacer { flex: 1; }
+  .nav { display: flex; gap: 4px; }
+  .chip { cursor: pointer; user-select: none; padding: 4px 10px; border-radius: 6px; font-size: 12px;
+          border: 1px solid var(--border); background: var(--panel); color: var(--muted); text-decoration: none; }
+  .chip:hover { color: var(--text); }
+  a.chip { display: inline-flex; align-items: center; }
+  .navlink.active { background: var(--accent); color: #fff; border-color: transparent; }
+
+  main { flex: 1; min-height: 0; overflow: auto; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 36px 22px 48px; }
+  .kicker { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--ok); margin: 0 0 8px; }
+  .hero { font-size: 28px; font-weight: 750; letter-spacing: -.3px; margin: 0 0 10px; line-height: 1.2; }
+  .lede { color: var(--muted); font-size: 15px; max-width: 62ch; margin: 0 0 28px; }
+
+  .arch { margin: 36px 0 32px; background: var(--panel); border: 1px solid var(--border);
+          border-radius: 14px; padding: 18px 18px 16px; overflow: hidden; }
+  .arch img { display: block; width: 100%; height: auto; border-radius: 10px; background: #fff; }
+  .arch figcaption { margin: 14px 2px 2px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .hero { font-size: 22px; } }
+
+  .card { display: flex; gap: 14px; align-items: flex-start; background: var(--panel); border: 1px solid var(--border);
+          border-radius: 14px; padding: 18px 16px; }
+  .ic { flex: none; width: 42px; height: 42px; border-radius: 50%; background: var(--ok); color: #fff;
+        display: grid; place-items: center; }
+  .ic svg { width: 22px; height: 22px; }
+  .card h3 { margin: 2px 0 6px; font-size: 15px; font-weight: 700; }
+  .card p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+
+  .bounds { margin-top: 28px; background: var(--panel2); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+  .bounds h2 { margin: 0 0 6px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .bounds p { margin: 0; color: var(--text); font-size: 13.5px; }
+
+  .cta { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .cta a { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px; }
+  .cta .primary { background: var(--accent); color: #fff; }
+  .cta .ghost { border: 1px solid var(--border); color: var(--text); background: var(--panel); }
+
+  .disc { margin-top: 32px; font-size: 12px; color: var(--muted); line-height: 1.55; max-width: 78ch; }
+</style>
+</head>
+<body>
+<header>
+  <h1>About</h1>
+  <nav class="nav">
+    <a class="chip navlink active" href="/about">ℹ️ about</a>
+    <a class="chip navlink" href="/dashboard">📊 dashboard</a>
+    <a class="chip navlink" href="/chat">💬 chat</a>
+    <a class="chip navlink" href="/hermes">⚕ hermes</a>
+    <a class="chip navlink" href="/">📡 traces</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
+</header>
+<main>
+  <div class="wrap">
+    <p class="kicker">What it does</p>
+    <h2 class="hero">What CliniClaw does</h2>
+    <p class="lede">A sandboxed agent for exploring patient records in plain language. It retrieves and reports what is in the chart — it does not give medical advice.</p>
+    <div class="grid">
+      <article class="card">
+        <div class="ic" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 15.5H4.5A2.5 2.5 0 0 1 2 13V7.5A2.5 2.5 0 0 1 4.5 5h8A2.5 2.5 0 0 1 15 7.5V8"/>
+            <path d="M8.5 10h9A2.5 2.5 0 0 1 20 12.5v5a2.5 2.5 0 0 1-2.5 2.5H14l-3.5 2.5V18H8.5A2.5 2.5 0 0 1 6 15.5v-3A2.5 2.5 0 0 1 8.5 10z"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Chart Q&amp;A</h3>
+          <p>A snapshot or a specific question, answered from labs, meds, conditions and visits.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="ic" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <rect x="2.8" y="9.2" width="18.4" height="7.2" rx="3.6" transform="rotate(-32 12 12.8)"/>
+            <path d="M8.2 9.6l7.6 4.8"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Drug Label Checks</h3>
+          <p>Screens a patient's meds and conditions against FDA labeling for interactions, warnings and contraindications.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="ic" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="8.2" cy="8" r="2.15"/>
+            <circle cx="15.8" cy="8" r="2.15"/>
+            <circle cx="12" cy="10.4" r="2.15"/>
+            <path d="M4.4 17.8c.3-2.5 2.2-4 3.8-4s3.5 1.5 3.8 4H4.4zm7.6 0c.3-2.5 2.2-4 3.8-4s3.5 1.5 3.8 4H12z"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Clinical Trial Cohort Search</h3>
+          <p>Screens the population against a trial's criteria and shortlists candidates with evidence.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="ic" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 3.8h8.2L19 7.6V20.2a1.4 1.4 0 0 1-1.4 1.4H7A1.4 1.4 0 0 1 5.6 20.2V5.2A1.4 1.4 0 0 1 7 3.8z"/>
+            <path d="M15.2 3.8V7.4H19"/>
+            <path d="M9.1 12.2h2.15M9.1 12.2c0 2.35 3.5 2.35 3.5 4.7h-3.5" stroke-width="1.9"/>
+            <path d="M13.6 12.2h1.9M14.55 12.2v4.7"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Natural Language Prescribing</h3>
+          <p>Physician types a drug name; the agent resolves it to the right RxNorm concept, builds the FHIR order, and writes it into the patient's record.</p>
+        </div>
+      </article>
+    </div>
+
+    <figure class="arch">
+      <img src="/assets/architecture.png" alt="CliniClaw architecture: data sources, NemoClaw agent with skills and Nemo Relay, and reasoning models on OpenShell" />
+      <figcaption>CliniClaw architecture — FHIR records, RxNorm, and openFDA labels flow through CliniClaw on OpenShell.</figcaption>
+    </figure>
+
+    <div class="bounds">
+      <h2>Boundaries</h2>
+      <p>CliniClaw looks up and reports what the record and labels say. Guardrails block medical advice and drug recommendations — it is a retrieval tool, not a clinical decision-maker. Trial matches are potential candidates, not eligibility determinations.</p>
+    </div>
+
+    <div class="cta">
+      <a class="primary" href="/#chat" target="_top">Open chat</a>
+      <a class="ghost" href="/#traces" target="_top">Watch traces</a>
+    </div>
+
+    <p class="disc">This demo is not for clinical use or actual patient care. It does not provide medical advice, diagnosis, or treatment. Patient records are synthetic. OpenFDA / NLM data is used as published; those agencies do not endorse this product.</p>
+  </div>
+</main>
+<script>
+const themeBtn = document.getElementById('themeToggle');
+function applyTheme(t) {
+  document.body.classList.toggle('light', t === 'light');
+  themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
+}
+let theme = 'dark';
+try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+applyTheme(theme);
+themeBtn.addEventListener('click', () => {
+  theme = document.body.classList.contains('light') ? 'dark' : 'light';
+  try { localStorage.setItem('atof-theme', theme); } catch (e) {}
+  applyTheme(theme);
+});
+window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+</script>
+</body>
+</html>
+"""
+
+
 def _env(name: str, default: str) -> str:
     val = os.environ.get(name)
     return val if val not in (None, "") else default
@@ -3217,6 +3453,7 @@ def main() -> None:
           f"token {'ok' if token else 'MISSING'})")
     print(f"  -> hermes: {url}/hermes  (embeds native dashboard on port {HERMES_DASHBOARD_PORT})")
     print(f"  -> dashboard: {url}/dashboard")
+    print(f"  -> about: {url}/about")
     print(f"  -> feeds persisted to: {STATE_DIR}" if STATE_DIR else "  -> feeds in-memory only (set DASHBOARD_STATE_DIR to persist)")
     print("  (Ctrl-C to stop)")
     try:

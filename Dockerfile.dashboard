@@ -4,6 +4,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 COPY scripts/dashboard.py /app/dashboard.py
+COPY assets/architecture.png /app/assets/architecture.png
 
 EXPOSE 8090
 

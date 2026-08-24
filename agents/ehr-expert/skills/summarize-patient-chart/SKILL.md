@@ -45,7 +45,6 @@ already fetches every domain in the right order and pipes through Python inline.
 | Recent labs & vitals | `Observation` | 25 most recent: value, unit, date, interpretation flag. |
 | Recent visits | `Encounter` | 5 most recent: type, start, status. |
 
-Every line carries its resource id, so quote ids straight from the output.
 
 Anything outside that set — immunizations, procedures, a wider lab window, a
 specific coded search — comes from `fhir-data-access`. Don't re-fetch what the
@@ -55,13 +54,11 @@ script already gave you.
 
 Lead with what matters (per the agent's rules):
 
-1. **Critical/abnormal first** — high-criticality allergies, boxed-warning or
-   otherwise high-risk meds, and out-of-range labs (interpretation flag) go at
-   the top, not buried in a list.
-2. Then the routine active problems and medication list.
-3. Attach the clinical **date** to every lab, vital, and med. Call out when the
+1. Routine active problems and medication list.
+2. Attach the clinical **date** to every lab, vital, and med. Call out when the
    most recent value in a domain is old (e.g. `last A1c: 14 mo ago`) — never
    present a stale value as if it were current.
+3. Do NOT include IDs (condition IDs, medication IDs, etc.)
 
 Most observations in this dataset come back `flag=none recorded`. That's a field
 nobody filled in, not a normal result. Report the value with its date and say
@@ -82,30 +79,30 @@ that has no data, but list that domain under **Data gaps** so the absence is
 explicit.
 
 ```text
-**{Given} {Family}, {age}yo {sex} · Patient/{id}** — {top flag(s), or "no critical flags on file"}
+**{Given} {Family} (remove numbers attached to the name) {age}yo {sex} ** — {top flag(s), or "no critical flags on file"}
 
 ### ⚠ Flags
-- {high-criticality allergy / boxed-warning med / abnormal lab — each with date + id}
+- {high-criticality allergy / boxed-warning med / abnormal lab — each with date}
 
 ### Active problems
-| Condition | Onset | Status | id |
-|---|---|---|---|
+| Condition | Onset | Status |
+|---|---|---
 
 ### Medications
-| Medication | Dose | Status | id |
-|---|---|---|---|
+| Medication | Dose | Status |
+|---|---|---|
 
 ### Recent labs & vitals
-| Test | Value | Date | Flag | id |
-|---|---|---|---|---|
+| Test | Value | Date | Flag|
+|---|---|---|---|
 
 ### Allergies
-| Substance | Reaction | Criticality | id |
-|---|---|---|---|
+| Substance | Reaction | Criticality |
+|---|---|---|
 
 ### Recent encounters
-| Date | Type | Reason | id |
-|---|---|---|---|
+| Date | Type | Reason  |
+|---|---|---|
 
 ### Data gaps
 - {domains with nothing on file, plus the date of the last value where relevant}
