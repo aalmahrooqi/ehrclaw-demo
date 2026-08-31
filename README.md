@@ -18,7 +18,7 @@ CliniClaw is a safe, sandboxed agent for exploring patient health records. Ask i
 
 ## FHIR Server
 
-This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.io/) with PostgreSQL. Sample patient records live in `data/` and come from [Synthea](https://synthea.mitre.org/downloads).
+This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.io/) with PostgreSQL. Sample patient records live in `data/` and come from [Synthea](https://synthea.mitre.org/downloads), hosted as [`aalmahrooqi/synthetic-fhir-data`](https://huggingface.co/datasets/aalmahrooqi/synthetic-fhir-data).
 
 ## Requirements
 
@@ -33,9 +33,13 @@ curl -fsSL https://www.nvidia.com/nemoclaw.sh | \
   ```
 
 ### 1. Download Sample Data
+
+Download the Synthea FHIR bundles from [Hugging Face](https://huggingface.co/datasets/aalmahrooqi/synthetic-fhir-data) and extract them into `data/`:
+
 ```bash
-mkdir -p data && curl -L -o data/synthea_sample_data_fhir_latest.zip "https://synthetichealth.github.io/synthea-sample-data/downloads/latest/synthea_sample_data_fhir_latest.zip" && unzip -q data/synthea_sample_data_fhir_latest.zip -d data
+curl -L -o data.zip "https://huggingface.co/datasets/aalmahrooqi/synthetic-fhir-data/resolve/main/data.zip" && unzip -q data.zip
 ```
+
 
 ### 2. Start the server
 

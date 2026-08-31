@@ -1,0 +1,16 @@
+- Tell me about patient Paul, dob 21-12-2013
+- Can I prescribe them Nadalol?
+- Find me patients that would qualify this clinical trial:
+  - **Inclusion Criteria:**
+    - Medically diagnosed patients with Type II diabetes
+    - Age between 30 and 55 years.
+    - Both male and female patients.
+    - Willingness to participate in the exercise program and ability to provide informed consent.
+    - On a stable regimen of anti-diabetic medications for at least three months prior to the study.
+  - **Exclusion Criteria:**
+    - Patients with Type I diabetes, diabetes insipidus, or gestational diabetes.
+    - Diagnosed chronic respiratory diseases such as COPD or asthma unrelated to diabetes.
+    - History of any abdominal, orthopedic, or spinal surgery that could interfere with balance.
+    - Uncontrolled cardiovascular conditions such as arrhythmias or recent myocardial infarction.
+    - Morbid obesity (BMI > 40).
+    - Pregnant women.
