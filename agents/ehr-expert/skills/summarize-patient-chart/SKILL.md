@@ -1,6 +1,6 @@
 ---
 name: summarize-patient-chart
-description: Produce a holistic, multi-domain overview of ONE patient from the connected FHIR dataset — active problems, current medications, recent labs and vitals, allergies, and recent encounters — with critical and abnormal findings surfaced first. Use when the user asks to summarize, review, or give an overview/snapshot of a single patient's chart or record. For targeted reads, searches, or counts of specific resources, use the fhir-data-access skill instead.
+description: Produce a holistic, multi-domain overview of ONE patient from the connected FHIR dataset — active problems, current medications, recent labs and vitals, allergies, and recent encounters — with critical and abnormal findings surfaced first. Use when the user asks to summarize, review, or give an overview/snapshot of a single patient's chart or record. Load this skill first for those asks, including when all you have is a name or a name + DOB, because it drives the patient lookup and owns the output format. For targeted reads, searches, or counts of specific resources, use the fhir-data-access skill instead.
 ---
 
 # Summarize Patient Chart
@@ -19,9 +19,9 @@ Not this skill:
 
 ## Two-step workflow
 
-> **Load `fhir-data-access` before this skill.** You need a confirmed patient id
-> before this skill is useful — load and use `fhir-data-access` first to resolve
-> the patient, then come back here.
+> **This skill owns the whole request.** `fhir-data-access` is the subroutine you
+> call for Step 1, not a replacement for this skill. A name or a name + DOB is
+> enough to start here; return to Step 2 the moment you have a confirmed id.
 
 **Step 1 — resolve the patient.** Given a name or name + DOB, use the
 **`fhir-data-access`** skill (see *Resolving a patient* there). Two candidates

@@ -1,6 +1,6 @@
 ---
 name: fhir-data-access
-description: Query the local HAPI FHIR R4 server for patient and clinical data using its REST API. Use when reading, searching, or counting FHIR resources (Patient, Observation, MedicationRequest, Encounter, Condition, etc.), or when the user asks about patient records, medications, labs, or other data held in the FHIR server.
+description: Query the local HAPI FHIR R4 server over its REST API for targeted reads, searches, and counts of specific FHIR resources (Patient, Observation, MedicationRequest, Encounter, Condition, etc.), and to resolve a patient name or name + DOB to a patient id. Use for one specific lookup — a single lab value, a medication list, a cohort count — or as the read layer for another skill. For a holistic multi-domain overview of ONE patient, such as summarizing, reviewing, or taking a snapshot of a chart or record, use the summarize-patient-chart skill instead; this skill only resolves the patient id that workflow starts from.
 ---
 
 # FHIR Data Access
@@ -85,6 +85,12 @@ curl -s -H 'Accept: application/fhir+json' \
   Don't take the first.
 - If you matched on name alone, say so — don't imply you confirmed a DOB you were
   never given.
+
+> **A chart-summary ask ends here.** With the id confirmed, re-read what was
+> actually asked. "Summarize", "review", "overview", "snapshot", "what's on file"
+> → that request belongs to `summarize-patient-chart`; load it and run its Step 2.
+> Resolving the id is this skill's entire part in that workflow, so don't assemble
+> the chart yourself with more curl calls.
 
 ## Useful search parameters
 
