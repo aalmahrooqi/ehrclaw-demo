@@ -10,8 +10,8 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      HOME: ${DASH_HOME:-/home/aalmahrooqi}
-      PATH: ${DASH_HOME:-/home/aalmahrooqi}/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+      HOME: ${DASH_HOME:-$HOME}
+      PATH: ${DASH_HOME:-$HOME}/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
       PYTHONUNBUFFERED: "1"
       # Dashboard
       ATOF_SANDBOX: ${ATOF_SANDBOX:-hermes-health}
@@ -31,13 +31,13 @@ services:
       HERMES_API_PORT: ${HERMES_API_PORT:-8642}
       HERMES_DASHBOARD_PORT: ${HERMES_DASHBOARD_PORT:-18789}
     volumes:
-      - ${DASH_HOME:-/home/aalmahrooqi}/.local:${DASH_HOME:-/home/aalmahrooqi}/.local:ro
-      - ${DASH_HOME:-/home/aalmahrooqi}/.nvm:${DASH_HOME:-/home/aalmahrooqi}/.nvm:ro
-      - ${DASH_HOME:-/home/aalmahrooqi}/.config:${DASH_HOME:-/home/aalmahrooqi}/.config:ro
+      - ${DASH_HOME:-$HOME}/.local:${DASH_HOME:-$HOME}/.local:ro
+      - ${DASH_HOME:-$HOME}/.nvm:${DASH_HOME:-$HOME}/.nvm:ro
+      - ${DASH_HOME:-$HOME}/.config:${DASH_HOME:-$HOME}/.config:ro
       # NemoClaw v0.0.97 updates OpenShell gateway selection/permissions while
       # executing sandbox commands; keep only that nested config writable.
-      - ${DASH_HOME:-/home/aalmahrooqi}/.config/openshell:${DASH_HOME:-/home/aalmahrooqi}/.config/openshell
-      - ${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:${DASH_HOME:-/home/aalmahrooqi}/.nemoclaw:ro
+      - ${DASH_HOME:-$HOME}/.config/openshell:${DASH_HOME:-$HOME}/.config/openshell
+      - ${DASH_HOME:-$HOME}/.nemoclaw:${DASH_HOME:-$HOME}/.nemoclaw:ro
       # Feed persistence (memory learning + skill evolution) across restarts.
       - dashboard-state:/app/state
 

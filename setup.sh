@@ -18,7 +18,12 @@ case "${1:-}" in
     *) echo "Unknown option: $1 (use -h for help)" >&2; exit 1 ;;
 esac
 
+PINNED_MCP_RUNTIME="${SCRIPT_DIR}/vendor/mcp-tool-discovery-runtime"
+
 command -v nemoclaw >/dev/null 2>&1 || { echo "ERROR: 'nemoclaw' CLI not found on PATH." >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: 'python3' not found on PATH." >&2; exit 1; }
+[ -f "${PINNED_MCP_RUNTIME}/package.json" ] || { echo "ERROR: ${PINNED_MCP_RUNTIME}/package.json not found." >&2; exit 1; }
+[ -f "${PINNED_MCP_RUNTIME}/package-lock.json" ] || { echo "ERROR: ${PINNED_MCP_RUNTIME}/package-lock.json not found." >&2; exit 1; }
 [ -f "${DOCKERFILE}" ] || { echo "ERROR: ${DOCKERFILE} not found." >&2; exit 1; }
 [ -d "${NEMOCLAW_SOURCE}" ] || { echo "ERROR: NemoClaw source not found at ${NEMOCLAW_SOURCE}." >&2; exit 1; }
 [ -f "${EHR_EXPERT}/SOUL.md" ] || { echo "ERROR: ${EHR_EXPERT}/SOUL.md not found." >&2; exit 1; }
@@ -36,6 +41,30 @@ for p in "${CONTEXT_PATHS[@]}"; do
     [ -e "${NEMOCLAW_SOURCE}/${p}" ] || { echo "ERROR: missing source subtree: ${p}" >&2; exit 1; }
 done
 ( cd "${NEMOCLAW_SOURCE}" && cp -a --parents "${CONTEXT_PATHS[@]}" "${STAGING}/" )
+
+# ── Overlay advisory-clean MCP runtime pins ────────────────────────────────
+# The staged runtime installer ends in `npm audit --omit=dev --audit-level=low`,
+# which queries the live advisory database. A lockfile that audited clean when
+# nemoclaw was vendored therefore starts failing the image build the day a new
+# advisory lands, and only on hosts without a cached layer for that step.
+# Overlay the pins that carry the fixes, but refuse to run if nemoclaw's own
+# dependency set moved, because the vendored lock would then be stale.
+STAGED_MCP_RUNTIME="${STAGING}/tools/mcp-tool-discovery-runtime"
+python3 - "${STAGED_MCP_RUNTIME}/package.json" "${PINNED_MCP_RUNTIME}/package.json" <<'PY'
+import json, sys
+
+with open(sys.argv[1]) as f: upstream = json.load(f)
+with open(sys.argv[2]) as f: pinned = json.load(f)
+
+drift = sorted(k for k in upstream.keys() | pinned.keys()
+               if k != "overrides" and upstream.get(k) != pinned.get(k))
+if drift:
+    sys.exit(f"ERROR: vendored MCP runtime pins are stale (differing keys: {', '.join(drift)}).\n"
+             "       Regenerate vendor/mcp-tool-discovery-runtime against the current nemoclaw source.")
+PY
+cp "${PINNED_MCP_RUNTIME}/package.json" "${STAGED_MCP_RUNTIME}/package.json"
+cp "${PINNED_MCP_RUNTIME}/package-lock.json" "${STAGED_MCP_RUNTIME}/package-lock.json"
+echo "[OK] Overlaid advisory-clean MCP runtime pins"
 
 mkdir -p "${STAGING}/health-demo"
 cp "${EHR_EXPERT}/SOUL.md" "${STAGING}/health-demo/SOUL.md"
