@@ -24,7 +24,13 @@ This project runs a local **FHIR R4** server using [HAPI FHIR](https://hapifhir.
 
 - **Python 3** — standard library only, used by `scripts/load_synthea.py` and the dashboard
 - **Docker**
-- [**NemoClaw**](https://github.com/NVIDIA/NemoClaw) v0.0.97 (`NEMOCLAW_INSTALL_TAG=v0.0.97 curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`)
+- [**NemoClaw**](https://github.com/NVIDIA/NemoClaw) v0.0.97:
+```
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | \
+  NEMOCLAW_INSTALL_REF= \
+  NEMOCLAW_INSTALL_TAG=v0.0.97 \
+  bash
+  ```
 
 ### 1. Download Sample Data
 ```bash
