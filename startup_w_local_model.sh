@@ -1,3 +1,3 @@
 export NEMOCLAW_PROVIDER="vllm"
 export NEMOCLAW_VLLM_PORT="8000"
-./setup.sh
+./setup_helper.sh

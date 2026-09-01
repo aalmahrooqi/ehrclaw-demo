@@ -70,19 +70,26 @@ The Hermes agent runs in an OpenShell sandbox managed by the **NemoClaw** CLI.
 
 ### Quick install
 
-From the repo root:
+From the repo root, run the startup script that matches your inference setup:
 
-```bash
-./setup.sh
-```
+| Script | Inference provider |
+|---|---|
+| `./startup_w_inference_api.sh` | NVIDIA-hosted API — set `COMPATIBLE_API_KEY` in the script first |
+| `./startup_w_local_model.sh` | Local vLLM on port 8000 — start it first with `scripts/run_vllm.sh` |
 
-This builds the vendored Hermes image (with [`nemo-relay`](https://github.com/NVIDIA/NeMo-Relay) baked in) and onboards a fresh `hermes-health` sandbox. Onboarding is interactive and will prompt for your inference provider/credentials.
+Each one exports its provider settings and then calls `setup_helper.sh`, which builds the vendored Hermes image (with [`nemo-relay`](https://github.com/NVIDIA/NeMo-Relay) baked in) and onboards a fresh `hermes-health` sandbox non-interactively.
 
 Once it finishes, connect and start chatting:
 
 ```bash
 nemoclaw hermes-health connect
 sandbox$ hermes chat
+```
+
+To stop the FHIR server, the dashboard, and the local vLLM container:
+
+```bash
+./shutdown.sh
 ```
 
 ## Trace Dashboard
