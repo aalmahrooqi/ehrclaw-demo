@@ -82,10 +82,11 @@ NEMOCLAW_SANDBOX_GPU=0 \
         --agent hermes \
         --fresh \
         --name "${SANDBOX_NAME}" \
+        --non-interactive \
         --from "${STAGING}/Dockerfile"
 
 openshell policy set ${SANDBOX_NAME} --policy "${SCRIPT_DIR}/policy/policy.yaml" --wait
 echo "=== Done. Connect with: ==="
 echo "  nemoclaw ${SANDBOX_NAME} connect"
 echo "  sandbox\$ hermes chat"
-
+echo "  Dashboard served at localhost:8090"
