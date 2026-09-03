@@ -1,48 +1,27 @@
-#!/usr/bin/env bashWhat can you do?
-H
-CliniClaw
+mkdir -p ~/hf-cache
 
-As a clinical data expert, I surface what's actually in patient records and medication data. I can:
-
-    Query FHIR R4 servers for lab results, vitals, conditions, medications, encounters, and allergies
-    Resolve free-text medication names, brands, and generics to RxNorm CUIs
-    Fetch openFDA drug labels and summarize interactions, boxed warnings, and contraindications
-    Produce multi-domain chart summaries (one patient, all domains)
-    Prescreen patients in connected FHIR datasets against trial criteria
-    Parse messy drug names and surface what sources actually say
-set -euo pipefail
-
-MODEL="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
-DRAFT_MODEL="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DSpark"
-VLLM_IMAGE="vllm/vllm-openai:v0.27.1"
-HF_CACHE="${XDG_CACHE_HOME:-$PWD/.cache}/huggingface"
-
-mkdir -p "$HF_CACHE"
-
-docker run -d --rm \
-  --name nemotron-vllm \
+docker run --rm --name qwen36-vllm \
   --gpus all \
   --ipc=host \
-  --network=host \
-  -e TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1 \
-  -v "$HF_CACHE:/root/.cache/huggingface" \
-  --entrypoint vllm \
-  "$VLLM_IMAGE" \
-  serve "$MODEL" \
-  --served-model-name nemotron-3.5-lightning \
-  --max-model-len 131072 \
-  --max-num-seqs 8 \
-  --moe-backend marlin \
-  --max-num-batched-tokens 4096 \
-  --kv-cache-dtype fp8 \
-  --enable-prefix-caching \
-  --gpu-memory-utilization 0.85 \
-  --mamba-backend flashinfer \
-  --mamba-cache-mode align \
-  --speculative_config.model "$DRAFT_MODEL" \
-  --speculative_config.num_speculative_tokens 3 \
-  --reasoning-parser nemotron_v3 \
-  --tool-call-parser qwen3_coder \
-  --enable-auto-tool-choice \
-  --host 0.0.0.0 \
-  --port 8000
+  -p 8000:8000 \
+  -v ~/hf-cache:/root/.cache/huggingface \
+  vllm/vllm-openai:nightly \
+  nvidia/Qwen3.6-35B-A3B-NVFP4 \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --tensor-parallel-size 1 \
+    --trust-remote-code \
+    --kv-cache-dtype fp8 \
+    --attention-backend flashinfer \
+    --gpu-memory-utilization 0.5 \
+    --max-model-len 114688 \
+    --max-num-seqs 4 \
+    --max-num-batched-tokens 8192 \
+    --enable-chunked-prefill \
+    --async-scheduling \
+    --enable-prefix-caching \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}' \
+    --load-format fastsafetensors \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --enable-auto-tool-choice
