@@ -2,7 +2,7 @@
 # Hermes agent setup for OpenShell (health demo).
 # SPDX-License-Identifier: Apache-2.0
 
-docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
+docker compose -f docker-compose.yaml -f docker-compose.dashboard.yaml up -d
 
 set -euo pipefail
 export NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS="inference-api.nvidia.com"
