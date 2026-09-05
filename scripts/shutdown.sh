@@ -1,3 +1,3 @@
 docker compose down
 docker compose -f docker-compose.dashboard.yaml down
-docker stop nemotron-vllm
+docker stop qwen36-vllm 2>/dev/null || true

@@ -2,11 +2,13 @@
 # Hermes agent setup for OpenShell (health demo).
 # SPDX-License-Identifier: Apache-2.0
 
-docker compose -f docker-compose.yaml -f docker-compose.dashboard.yaml up -d
-
 set -euo pipefail
 export NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS="inference-api.nvidia.com"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${SCRIPT_DIR}"
+
+docker compose -f docker-compose.yaml -f docker-compose.dashboard.yaml up -d
+
 SANDBOX_NAME="hermes-health"
 NEMOCLAW_SOURCE="${NEMOCLAW_SOURCE:-${HOME}/.nemoclaw/source}"
 DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
