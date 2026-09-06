@@ -1,5 +1,25 @@
 # CliniClaw
 
+## Running this for BaC?
+
+`./bac_setup.sh` does every step in this README for you, end to end, using the local vLLM model:
+
+```bash
+./bac_setup.sh
+```
+
+It installs the NemoClaw CLI if it's missing, downloads and extracts the synthetic patient data, starts the FHIR server and loads the bundles into it, brings up local vLLM, then builds the Hermes image and onboards the `hermes-health` sandbox.
+
+The first run takes a while — it pulls the vLLM image and downloads the model weights into `~/hf-cache`. Those logs stream to `logs/vllm.log`, so `tail -f logs/vllm.log` is the place to look if it seems stuck.
+
+When it finishes, open the dashboard at **http://127.0.0.1:8090**!
+
+Tear it all down with `./scripts/shutdown.sh`.
+
+The rest of this README covers the same steps manually, plus how the pieces fit together.
+
+## About
+
 A patient's records can be dense and sprawling, spanning many visits and years of history that take real time to read through. CliniClaw helps clinicians cut through that: get a quick snapshot or ask a specific question and get an answer in seconds — so physicians can spend more time giving care and listening to patients, and less time navigating charts.
 
 CliniClaw is a safe, sandboxed agent for exploring patient health records. Ask it questions in plain language and it looks up the answer from a patient's chart: labs, medications, conditions, visits, and more, while staying strictly within safe boundaries: it retrieves and reports information, but never gives medical advice. It can also check a patient's medications against a drug's labeling for interactions, warnings, and contraindications. Physicians may also ask the agent to prescribe drugs to the patient in natural language, and CliniClaw resolves it to the right drug concept (RxNorm CUI), builds the underlying FHIR request, and writes it to the record for the patient. And given a clinical trial's criteria, it can prescreen the patient population to surface potential matches, each backed by evidence from the record, to help shortlist candidates worth a closer look.
@@ -74,10 +94,10 @@ From the repo root, run the startup script that matches your inference setup:
 
 | Script | Inference provider |
 |---|---|
-| `./startup_w_inference_api.sh` | NVIDIA-hosted API — set `COMPATIBLE_API_KEY` in the script first |
-| `./startup_w_local_model.sh` | Local vLLM on port 8000 — start it first with `scripts/run_vllm.sh` |
+| `./scripts/startup_w_inference_api.sh` | NVIDIA-hosted API — set `COMPATIBLE_API_KEY` in the script first |
+| `./scripts/startup_w_local_model.sh` | Local vLLM on port 8000 — start it first with `scripts/run_vllm.sh` |
 
-Each one exports its provider settings and then calls `setup_helper.sh`, which builds the vendored Hermes image (with [`nemo-relay`](https://github.com/NVIDIA/NeMo-Relay) baked in) and onboards a fresh `hermes-health` sandbox non-interactively.
+Each one exports its provider settings and then calls `scripts/setup_helper.sh`, which builds the vendored Hermes image (with [`nemo-relay`](https://github.com/NVIDIA/NeMo-Relay) baked in) and onboards a fresh `hermes-health` sandbox non-interactively.
 
 Once it finishes, connect and start chatting:
 
@@ -89,7 +109,7 @@ sandbox$ hermes chat
 To stop the FHIR server, the dashboard, and the local vLLM container:
 
 ```bash
-./shutdown.sh
+./scripts/shutdown.sh
 ```
 
 ## Trace Dashboard

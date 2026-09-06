@@ -1,4 +1,4 @@
-# OS
+it # OS
 .DS_Store
 
 # Python
@@ -22,3 +22,5 @@ credentials.json
 
 # Data
 data/
+# Logs
+logs/
