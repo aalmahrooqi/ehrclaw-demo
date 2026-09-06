@@ -7,7 +7,15 @@ export NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS="inference-api.nvidia.com"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${SCRIPT_DIR}"
 
-docker compose -f docker-compose.yaml -f docker-compose.dashboard.yaml up -d
+# Two separate compose projects: docker-compose.dashboard.yaml sets its own
+# `name:`, so merging both files with -f would recreate the FHIR containers
+# under the dashboard project and collide with the ones already running.
+if docker ps -q -f "name=^health-demo-hapi$" -f status=running | grep -q .; then
+    echo "[OK] FHIR server already running"
+else
+    docker compose -f docker-compose.yaml up -d
+fi
+docker compose -f docker-compose.dashboard.yaml up -d
 
 SANDBOX_NAME="hermes-health"
 NEMOCLAW_SOURCE="${NEMOCLAW_SOURCE:-${HOME}/.nemoclaw/source}"

@@ -44,10 +44,18 @@ docker info >/dev/null 2>&1 || { echo "ERROR: cannot reach the Docker daemon." >
 
 if ! command -v nemoclaw >/dev/null 2>&1; then
     echo "--- Installing NemoClaw ${NEMOCLAW_TAG} ---"
+    # The installer always finishes by onboarding a sandbox of its own, and on a
+    # DGX Spark it defaults to an "express install" that creates `my-assistant`
+    # with its own managed vLLM. NEMOCLAW_NO_EXPRESS=1 keeps it off that path;
+    # all we want here is the CLI, so its onboarding result is ignored and
+    # setup_helper.sh onboards hermes-health from our own Dockerfile instead.
     curl -fsSL https://www.nvidia.com/nemoclaw.sh | \
         NEMOCLAW_INSTALL_REF= \
         NEMOCLAW_INSTALL_TAG="${NEMOCLAW_TAG}" \
-        bash
+        NEMOCLAW_NO_EXPRESS=1 \
+        NEMOCLAW_NON_INTERACTIVE=1 \
+        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
+        bash || echo "    (installer onboarding skipped/failed — only the CLI is needed here)"
     export PATH="${HOME}/.nemoclaw/bin:${HOME}/.local/bin:${PATH}"
     command -v nemoclaw >/dev/null 2>&1 || {
         echo "ERROR: nemoclaw is installed but not on PATH — open a new shell and re-run." >&2
@@ -65,19 +73,23 @@ else
 fi
 
 # ── 2. FHIR server ─────────────────────────────────────────────────────────
-echo "--- Starting the FHIR server ---"
-docker compose up -d
+if docker ps -q -f "name=^health-demo-hapi$" -f status=running | grep -q .; then
+    echo "--- FHIR server already running, skipping ---"
+else
+    echo "--- Starting the FHIR server ---"
+    docker compose up -d
+fi
 
 # ── 3. Load the Synthea bundles ────────────────────────────────────────────
 # load_synthea.py waits for the server to accept requests before uploading.
-if [ "${SKIP_LOAD}" -eq 1 ]; then
-    echo "--- Skipping the data load (--skip-load) ---"
-else
-    # sleep for 30 s
-    sleep 30
-    echo "--- Loading the Synthea bundles (takes a few minutes) ---"
-    python3 scripts/load_synthea.py --data-dir data
-fi
+# if [ "${SKIP_LOAD}" -eq 1 ]; then
+#     echo "--- Skipping the data load (--skip-load) ---"
+# else
+#     # sleep for 30 s
+#     sleep 30
+#     echo "--- Loading the Synthea bundles (takes a few minutes) ---"
+#     python3 scripts/load_synthea.py --data-dir data
+# fi
 
 # ── 4. Local vLLM ──────────────────────────────────────────────────────────
 if [ "${SKIP_VLLM}" -eq 1 ]; then
@@ -111,21 +123,32 @@ fi
 # ── 5. Hermes sandbox + dashboard ──────────────────────────────────────────
 # startup_w_local_model.sh exports the vLLM provider settings and hands off to
 # setup_helper.sh, which brings up the dashboard, builds the image and onboards.
-if command -v openshell >/dev/null 2>&1 && ! openshell status >/dev/null 2>&1; then
-    echo "--- OpenShell gateway is down, restarting it ---"
+# `nemoclaw onboard` prefers the managed systemd gateway, which on this host
+# starts but never answers its gRPC health check, so onboarding dies on the
+# gateway health deadline. A hand-spawned gateway does come up, and onboarding
+# reuses whichever healthy gateway already holds port 8080 — so start one here
+# when the port is free, and leave an existing gateway alone.
+if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then
+    echo "--- OpenShell gateway already listening on port 8080 ---"
+else
+    echo "--- Starting the OpenShell gateway ---"
+    # A failed onboarding leaves the managed unit restarting, and it wants the
+    # same port. Stop it so the hand-spawned gateway is the only owner of 8080.
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user stop nemoclaw-openshell-gateway 2>/dev/null || true
+        systemctl --user reset-failed nemoclaw-openshell-gateway 2>/dev/null || true
+    fi
     ./scripts/fix_gateway_issues.sh
 fi
 
 echo "--- Building the Hermes image and onboarding the sandbox ---"
-./startup_w_local_model.sh
+./scripts/startup_w_local_model.sh
 
-cat <<EOF
-
-=============================================
-|       Demo is up! 🚀                      |
-|       Dashboard: http://127.0.0.1:8090    |
-=============================================
-
-Tear everything down with ./shutdown.sh
-
-EOF
+echo ""
+echo "============================================="
+echo "|       Demo is up! 🚀                      |"
+echo "|       Dashboard: http://127.0.0.1:8090    |"
+echo "============================================="
+echo ""
+echo "Tear everything down with ./scripts/shutdown.sh"
+echo ""

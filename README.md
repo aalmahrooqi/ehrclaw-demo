@@ -8,6 +8,9 @@
 ./bac_setup.sh
 ```
 
+> If you get an Openshell timeout error, running the script again usually should work.
+
+
 It installs the NemoClaw CLI if it's missing, downloads and extracts the synthetic patient data, starts the FHIR server and loads the bundles into it, brings up local vLLM, then builds the Hermes image and onboards the `hermes-health` sandbox.
 
 The first run takes a while — it pulls the vLLM image and downloads the model weights into `~/hf-cache`. Those logs stream to `logs/vllm.log`, so `tail -f logs/vllm.log` is the place to look if it seems stuck.

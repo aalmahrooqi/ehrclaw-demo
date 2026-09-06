@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+# Start a hand-spawned OpenShell gateway on port 8080.
+
 STATE="$HOME/.local/state/nemoclaw/openshell-docker-gateway"
 BIN="$HOME/.local/bin/openshell-gateway"
 
@@ -20,5 +23,17 @@ export OPENSHELL_GATEWAY_CONFIG="$STATE/openshell-gateway.toml"
 setsid bash -c 'exec -a "openshell-gateway[nemoclaw=nemoclaw;port=8080]" "$0" "$@"' "$BIN" \
   >>"$STATE/openshell-gateway.log" 2>&1 < /dev/null &
 echo $! > "$STATE/openshell-gateway.pid"
+
+# The gateway takes a moment to bind, and `openshell status` exits non-zero
+# with "Connection refused" if it is called before then.
+for _ in $(seq 1 60); do
+    (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null && break
+    sleep 1
+done
+(exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null || {
+    echo "ERROR: gateway did not start listening on port 8080. See $STATE/openshell-gateway.log." >&2
+    exit 1
+}
+
 openshell status
 openshell sandbox list
