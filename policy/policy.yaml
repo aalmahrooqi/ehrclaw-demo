@@ -42,6 +42,28 @@ network_policies:
       - '172.18.0.1/32'
     binaries:
     - path: /usr/bin/curl
+  allow_nv_reason_cxr_space_443:
+    name: allow_nv_reason_cxr_space_443
+    endpoints:
+    - host: nvidia-nv-reason-cxr.hf.space
+      port: 443
+      protocol: rest
+      enforcement: enforce
+      rules:
+      - allow:
+          method: GET
+          path: /**
+      - allow:
+          method: POST
+          path: /gradio_api/upload
+      - allow:
+          method: POST
+          path: /gradio_api/queue/join
+    binaries:
+    - path: /usr/bin/python3*
+    - path: /usr/local/bin/python3
+    - path: /opt/venv/bin/python3
+    - path: /opt/hermes/.venv/bin/python
   allow_rxnav_nlm_nih_gov_443:
     name: allow_rxnav_nlm_nih_gov_443
     endpoints:

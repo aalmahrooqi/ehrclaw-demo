@@ -17,6 +17,7 @@ Then open http://localhost:8090
 from __future__ import annotations
 
 import argparse
+import base64
 import difflib
 import json
 import os
@@ -64,8 +65,10 @@ SKILLS_DIR = "/sandbox/.hermes/skills"      # agent skill library (SKILL.md per 
 CUSTOM_SKILLS: set[str] = {
     "summarize-patient-chart", "fhir-data-access",
     "fhir-medication-request-write", "clinical-trial-cohort-prescreener",
-    "drug-label-interactions", "rxnorm-resolve-rxcui",
+    "drug-label-interactions", "rxnorm-resolve-rxcui", "nv-reason-cxr",
 }
+CXR_DIR = "/sandbox/cxr"     # where chat image uploads land for the nv-reason-cxr skill
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 POLL_INTERVAL = 1.0          # seconds between sandbox polls
 MEMORY_POLL_INTERVAL = 5.0   # seconds between memory-dir polls
 SKILL_POLL_INTERVAL = 8.0    # seconds between skill-dir polls
@@ -550,6 +553,61 @@ def fetch_new_bytes(path: str, offset: int) -> bytes:
     return proc.stdout
 
 
+# ---------------------------------------------------------------------------
+# Chat image uploads (chest X-rays for the nv-reason-cxr skill)
+# ---------------------------------------------------------------------------
+# `nemoclaw exec` does not forward stdin, and `openshell sandbox upload` needs
+# ssh + tar, which this container does not ship. So image bytes ride in as
+# base64 argv chunks: the kernel caps a single argv entry at 128 KiB and the
+# whole vector at ~2 MiB, hence the two limits below.
+UPLOAD_CHUNK_CHARS = 60_000
+UPLOAD_CHUNKS_PER_CALL = 16
+_IMAGE_MAGIC = ((b"\x89PNG\r\n\x1a\n", ".png"), (b"\xff\xd8\xff", ".jpg"))
+
+
+def image_extension(data: bytes) -> str:
+    """Extension implied by the image's magic bytes, or '' when unrecognized."""
+    for magic, ext in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return ext
+    return ""
+
+
+def safe_upload_name(raw: str, ext: str) -> str:
+    """Reduce a browser-supplied filename to a harmless sandbox basename."""
+    stem = Path(raw or "").name
+    stem = stem[: -len(ext)] if ext and stem.lower().endswith(ext) else Path(stem).stem
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")[:60]
+    return f"{stem or 'upload-' + uuid.uuid4().hex[:8]}{ext}"
+
+
+def upload_image(name: str, data: bytes) -> str:
+    """Write `data` into the sandbox at CXR_DIR/name and return that path."""
+    dest = f"{CXR_DIR}/{name}"
+    staging = f"{CXR_DIR}/.upload-{uuid.uuid4().hex}.b64"
+    q_staging, q_dest = shlex.quote(staging), shlex.quote(dest)
+    b64 = base64.b64encode(data).decode()
+    chunks = [b64[i:i + UPLOAD_CHUNK_CHARS] for i in range(0, len(b64), UPLOAD_CHUNK_CHARS)]
+
+    try:
+        _exec(["mkdir", "-p", CXR_DIR])
+        for pos in range(0, len(chunks), UPLOAD_CHUNKS_PER_CALL):
+            batch = chunks[pos:pos + UPLOAD_CHUNKS_PER_CALL]
+            redirect = ">" if pos == 0 else ">>"
+            _exec(["sh", "-c", f'printf "%s" "$@" {redirect} {q_staging}', "sh", *batch])
+        _exec(["sh", "-c", f"base64 -d {q_staging} > {q_dest}"])
+        written = _exec(["sh", "-c", f"wc -c < {q_dest}"]).stdout.decode().strip()
+    finally:
+        try:
+            _exec(["rm", "-f", staging])
+        except (RuntimeError, subprocess.SubprocessError):
+            pass
+
+    if written != str(len(data)):
+        raise RuntimeError(f"upload landed as {written} bytes, expected {len(data)}")
+    return dest
+
+
 def discover_gateway_token() -> str:
     """Fetch the sandbox agent auth token used as the Hermes agent API bearer.
 
@@ -931,8 +989,41 @@ class Handler(BaseHTTPRequestHandler):
             self._proxy_chat()
         elif parsed.path == "/api/chat/new":
             self._new_chat_session()
+        elif parsed.path == "/api/upload":
+            self._upload_image(parsed)
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _upload_image(self, parsed) -> None:
+        """Drop an image posted by the chat composer into the sandbox."""
+        def fail(code: int, message: str) -> None:
+            self._send(code, json.dumps({"error": message}).encode(), "application/json")
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0:
+            fail(400, "no image data received")
+            return
+        if length > MAX_UPLOAD_BYTES:
+            fail(413, f"image is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+            return
+
+        data = self.rfile.read(length)
+        ext = image_extension(data)
+        if not ext:
+            fail(415, "only PNG and JPEG images are supported")
+            return
+
+        raw_name = (parse_qs(parsed.query).get("name") or [""])[0]
+        name = safe_upload_name(unquote(raw_name), ext)
+        try:
+            path = upload_image(name, data)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            fail(502, f"could not write the image into the sandbox: {exc}"[:400])
+            return
+        self._send(200, json.dumps({"path": path, "bytes": len(data)}).encode(), "application/json")
 
     def _hermes_call(
         self,
@@ -1461,6 +1552,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
              overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--code-fg);
              font: 12px/1.5 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
   .md strong { color: var(--text); font-weight: 700; }
+  .md blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--tool);
+                   background: rgba(62,207,142,.05); color: var(--muted); }
+  .md blockquote p { margin: 4px 0; }
+  .md blockquote strong { color: var(--text); }
 
   /* reasoning */
   .reasoning { color: var(--muted); font-style: italic; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
@@ -1699,8 +1794,12 @@ function buildNode(value, key, depth, autoDepth) {
 /* ------------------------------------------------------ markdown-lite */
 function mdLite(text) {
   const lines = esc(text).split(/\r?\n/);
-  let html = '', inUl = false, inOl = false, inCode = false, code = '';
-  const closeLists = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
+  let html = '', inUl = false, inOl = false, inCode = false, code = '', inBq = false;
+  const closeLists = () => {
+    if (inUl) { html += '</ul>'; inUl = false; }
+    if (inOl) { html += '</ol>'; inOl = false; }
+    if (inBq) { html += '</blockquote>'; inBq = false; }
+  };
   const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   for (const raw of lines) {
     if (/^\s*```/.test(raw)) {
@@ -1709,6 +1808,14 @@ function mdLite(text) {
       continue;
     }
     if (inCode) { code += raw + '\n'; continue; }
+    // Quoted lines arrive as "&gt; ..." because esc() ran over the whole text.
+    const bq = raw.match(/^\s*&gt;\s?(.*)$/);
+    if (bq) {
+      if (inUl || inOl) closeLists();
+      if (!inBq) { html += '<blockquote>'; inBq = true; }
+      if (bq[1].trim() !== '') html += '<p>' + inline(bq[1]) + '</p>';
+      continue;
+    }
     const ol = raw.match(/^\s*\d+\.\s+(.*)/);
     const ul = raw.match(/^\s*[-*]\s+(.*)/);
     if (ol) { if (!inOl) { closeLists(); html += '<ol>'; inOl = true; } html += '<li>' + inline(ol[1]) + '</li>'; continue; }
@@ -2237,6 +2344,10 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .md table.md-table td { white-space: normal; }
   .md table.md-table th { background: var(--panel2); color: var(--text); font-weight: 700; }
   .md table.md-table tr:nth-child(even) td { background: rgba(127,127,127,.06); }
+  .md blockquote { margin: 9px 0; padding: 2px 0 2px 13px; border-left: 3px solid var(--tool);
+                   background: rgba(62,207,142,.05); color: var(--muted); }
+  .md blockquote p { margin: 5px 0; }
+  .md blockquote strong { color: var(--text); }
 
   .composer { width: 100%; max-width: 820px; padding: 10px 18px 18px; }
   .inputbar { display: flex; gap: 10px; align-items: flex-end; background: var(--panel); border: 1px solid var(--border);
@@ -2247,6 +2358,22 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .send { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 0; cursor: pointer;
           background: var(--accent); color: #fff; font-size: 16px; display: grid; place-items: center; }
   .send:disabled { opacity: .4; cursor: not-allowed; }
+  .attach { flex: none; width: 36px; height: 36px; border-radius: 10px; cursor: pointer; background: transparent;
+            border: 1px solid var(--border); color: var(--muted); font-size: 15px; display: grid; place-items: center; }
+  .attach:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+  .attach:disabled { opacity: .4; cursor: not-allowed; }
+  .attached { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 2px; }
+  .attached .file { display: inline-flex; align-items: center; gap: 6px; background: var(--panel);
+                    border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 12px;
+                    color: var(--text); }
+  .attached .file.err { border-color: var(--err); color: var(--err); }
+  .attached .file .path { color: var(--muted); font-family: "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
+  .attached .file button { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; }
+  .attached .file img { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; background: #000; }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .shots:last-child { margin-bottom: 0; }
+  .shots img { max-width: min(320px, 100%); max-height: 260px; border-radius: 8px; border: 1px solid var(--border);
+               background: #000; display: block; }
   .send.stop { background: var(--err); }
   .hint { color: var(--muted); font-size: 11px; text-align: center; margin-top: 8px; }
   .empty { color: var(--muted); text-align: center; margin: 12% auto 0; max-width: 460px; }
@@ -2280,12 +2407,15 @@ CHAT_HTML = r"""<!DOCTYPE html>
       <div class="suggest" id="suggest">
         <button>What can you do?</button>
         <button>How many patients are in the system?</button>
-        <button>What medications is patient 1000 on?</button>
+        <button>Tell me about patient Paul, born on 21/12/2013?</button>
       </div>
     </div>
   </div>
   <div class="composer">
+    <div class="attached" id="attached"></div>
     <div class="inputbar">
+      <input type="file" id="file" accept="image/png,image/jpeg" hidden>
+      <button class="attach" id="attach" title="Attach a chest X-ray (PNG or JPEG)">📎</button>
       <textarea id="input" rows="1" placeholder="Type your message here…"></textarea>
       <button class="send" id="send" title="Send" disabled>➤</button>
     </div>
@@ -2298,12 +2428,17 @@ const emptyEl = document.getElementById('empty');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const newChatBtn = document.getElementById('newChat');
+const attachBtn = document.getElementById('attach');
+const fileInput = document.getElementById('file');
+const attachedEl = document.getElementById('attached');
 document.getElementById('sub').textContent = 'hermes-agent';
 
 let messages = [];          // {role, content} conversation history
 let sessionId = null;       // Hermes X-Hermes-Session-Id for this thread
 let streaming = false;
 let controller = null;
+let attachments = [];       // {name, path, url} images already living in the sandbox
+let blobUrls = [];          // preview URLs to release when the thread is cleared
 
 function setSession(id) {
   sessionId = id || null;
@@ -2315,8 +2450,12 @@ function setSession(id) {
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function mdLite(text) {
   const lines = esc(text).split(/\r?\n/);
-  let html = '', inUl = false, inOl = false, inCode = false, code = '';
-  const closeLists = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
+  let html = '', inUl = false, inOl = false, inCode = false, code = '', inBq = false;
+  const closeLists = () => {
+    if (inUl) { html += '</ul>'; inUl = false; }
+    if (inOl) { html += '</ol>'; inOl = false; }
+    if (inBq) { html += '</blockquote>'; inBq = false; }
+  };
   const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   // GitHub-style pipe tables
   const isSep = s => /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(s) && s.includes('-');
@@ -2341,6 +2480,14 @@ function mdLite(text) {
       continue;
     }
     if (inCode) { code += raw + '\n'; continue; }
+    // Quoted lines arrive as "&gt; ..." because esc() ran over the whole text.
+    const bq = raw.match(/^\s*&gt;\s?(.*)$/);
+    if (bq) {
+      if (inUl || inOl) closeLists();
+      if (!inBq) { html += '<blockquote>'; inBq = true; }
+      if (bq[1].trim() !== '') html += '<p>' + inline(bq[1]) + '</p>';
+      continue;
+    }
     if (isRow(raw)) {
       const sepAt = skipBlank(lines, i + 1);
       if (sepAt < lines.length && isSep(lines[sepAt])) {
@@ -2382,7 +2529,7 @@ function mdLite(text) {
   return html;
 }
 
-function addMessage(role, text) {
+function addMessage(role, text, images) {
   emptyEl.style.display = 'none';
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + role;
@@ -2397,7 +2544,8 @@ function addMessage(role, text) {
   who.textContent = role === 'user' ? 'you' : 'CliniClaw';
   const bubble = document.createElement('div');
   bubble.className = 'bubble md';
-  if (text != null) bubble.innerHTML = mdLite(text);
+  if (images && images.length) bubble.appendChild(shotStrip(images));
+  if (text) bubble.insertAdjacentHTML('beforeend', mdLite(text));
   col.appendChild(who); col.appendChild(bubble);
   wrap.appendChild(av); wrap.appendChild(col);
   thread.appendChild(wrap);
@@ -2472,16 +2620,110 @@ function setStreaming(on) {
   streaming = on;
   sendBtn.classList.toggle('stop', on);
   sendBtn.textContent = on ? '■' : '➤';
-  sendBtn.disabled = on ? false : input.value.trim() === '';
+  sendBtn.disabled = on ? false : !hasDraft();
   sendBtn.title = on ? 'Stop' : 'Send';
+  attachBtn.disabled = on;
+}
+
+// An attached image counts as a draft even with an empty textarea.
+function hasDraft() { return input.value.trim() !== '' || attachments.length > 0; }
+function refreshSend() { if (!streaming) sendBtn.disabled = !hasDraft(); }
+
+function renderAttached() {
+  attachedEl.innerHTML = '';
+  attachments.forEach((a, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'file' + (a.error ? ' err' : '');
+    const thumb = a.url && !a.error ? '<img src="' + a.url + '" alt="">' : '🖼';
+    chip.innerHTML = a.error
+      ? '🖼 ' + esc(a.name) + ' — ' + esc(a.error)
+      : thumb + ' ' + esc(a.name) + (a.path ? ' <span class="path">' + esc(a.path) + '</span>' : ' uploading…');
+    if (a.path || a.error) {
+      const x = document.createElement('button');
+      x.textContent = '✕';
+      x.title = 'Remove';
+      x.addEventListener('click', () => {
+        releaseBlob(a.url);
+        attachments.splice(i, 1);
+        renderAttached();
+        refreshSend();
+      });
+      chip.appendChild(x);
+    }
+    attachedEl.appendChild(chip);
+  });
+  refreshSend();
+}
+
+function releaseBlob(url) {
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  blobUrls = blobUrls.filter(u => u !== url);
+}
+
+async function uploadFile(file) {
+  const entry = { name: file.name, path: '', error: '', url: URL.createObjectURL(file) };
+  blobUrls.push(entry.url);
+  attachments.push(entry);
+  renderAttached();
+  try {
+    const res = await fetch('/api/upload?name=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    entry.path = data.path;
+  } catch (e) {
+    entry.error = e.message || 'upload failed';
+  }
+  renderAttached();
+}
+
+// Thumbnails of what the user attached, rendered from the local blob URL so no
+// round trip to the sandbox is needed to look at the film again.
+function shotStrip(images) {
+  const strip = document.createElement('div');
+  strip.className = 'shots';
+  images.forEach(img => {
+    const a = document.createElement('a');
+    a.href = img.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = img.path || img.name;
+    const el = document.createElement('img');
+    el.src = img.url;
+    el.alt = img.name;
+    a.appendChild(el);
+    strip.appendChild(a);
+  });
+  return strip;
+}
+
+// The chat API carries text only, so the sandbox paths ride along in the message.
+function composeMessage(typed) {
+  const paths = attachments.filter(a => a.path).map(a => a.path);
+  if (!paths.length) return typed;
+  const body = typed || 'Analyze this chest X-ray.';
+  const missing = paths.filter(p => !body.includes(p));
+  if (!missing.length) return body;
+  const label = missing.length > 1 ? 'Images' : 'Image';
+  return body + '\n\n' + label + ': ' + missing.join(', ');
 }
 
 async function send() {
-  const text = input.value.trim();
-  if (!text || streaming) return;
+  const typed = input.value.trim();
+  if (!hasDraft() || streaming) return;
+  const text = composeMessage(typed);
+  if (!text) return;
+  // The agent needs the sandbox path in the text; the bubble shows the picture
+  // instead, so the user sees what they sent rather than a path they typed around.
+  const shots = attachments.filter(a => a.path && a.url);
   input.value = ''; autosize();
+  attachments = []; renderAttached();
   messages.push({ role: 'user', content: text });
-  addMessage('user', text);
+  addMessage('user', typed, shots);
 
   const turn = addAssistantTurn();
   const bubble = turn.bubble;
@@ -2634,10 +2876,28 @@ function autosize() {
 }
 
 sendBtn.addEventListener('click', () => { streaming ? stop() : send(); });
-input.addEventListener('input', () => { autosize(); if (!streaming) sendBtn.disabled = input.value.trim() === ''; });
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  for (const file of Array.from(fileInput.files || [])) await uploadFile(file);
+  fileInput.value = '';
+  input.focus();
+});
+input.addEventListener('input', () => { autosize(); refreshSend(); });
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
+input.addEventListener('paste', e => {
+  const files = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  files.forEach(uploadFile);
+});
+['dragover', 'drop'].forEach(evt => document.addEventListener(evt, e => {
+  if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+  e.preventDefault();
+  if (evt !== 'drop' || streaming) return;
+  Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/')).forEach(uploadFile);
+}));
 newChatBtn.addEventListener('click', async () => {
   if (streaming) stop();
   newChatBtn.disabled = true;
@@ -2653,7 +2913,10 @@ newChatBtn.addEventListener('click', async () => {
     setSession(null);
   }
   messages = [];
+  attachments = []; renderAttached();
   thread.querySelectorAll('.msg').forEach(m => m.remove());
+  blobUrls.forEach(URL.revokeObjectURL);
+  blobUrls = [];
   emptyEl.style.display = '';
   newChatBtn.disabled = false;
   input.focus();
@@ -2897,6 +3160,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .md h1, .md h2, .md h3, .md h4 { font-size: 13.5px; margin: 10px 0 4px; }
   .md p { margin: 6px 0; } .md ul, .md ol { margin: 6px 0; padding-left: 20px; }
   .md li { margin: 2px 0; }
+  .md blockquote { margin: 7px 0; padding: 2px 0 2px 11px; border-left: 3px solid var(--tool);
+                   background: rgba(62,207,142,.05); color: var(--muted); }
+  .md blockquote p { margin: 4px 0; }
   .md code { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
              font-family: "SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size: 12px; }
   .md strong { color: var(--text); font-weight: 700; }
@@ -2998,10 +3264,22 @@ window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function mdLite(text){
   const lines = esc(text).split(/\r?\n/);
-  let html = '', inUl = false, inOl = false;
-  const closeL = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
+  let html = '', inUl = false, inOl = false, inBq = false;
+  const closeL = () => {
+    if (inUl) { html += '</ul>'; inUl = false; }
+    if (inOl) { html += '</ol>'; inOl = false; }
+    if (inBq) { html += '</blockquote>'; inBq = false; }
+  };
   const inl = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   for (const raw of lines) {
+    // Quoted lines arrive as "&gt; ..." because esc() ran over the whole text.
+    const bq = raw.match(/^\s*&gt;\s?(.*)$/);
+    if (bq) {
+      if (inUl || inOl) closeL();
+      if (!inBq) { html += '<blockquote>'; inBq = true; }
+      if (bq[1].trim() !== '') html += '<p>' + inl(bq[1]) + '</p>';
+      continue;
+    }
     const h = raw.match(/^\s*(#{1,6})\s+(.*)$/);
     if (h) { closeL(); const lv = Math.min(h[1].length, 4); html += '<h' + lv + '>' + inl(h[2]) + '</h' + lv + '>'; continue; }
     const ol = raw.match(/^\s*\d+\.\s+(.*)/), ul = raw.match(/^\s*[-*]\s+(.*)/);
@@ -3339,8 +3617,8 @@ ABOUT_HTML = r"""<!DOCTYPE html>
           </svg>
         </div>
         <div>
-          <h3>Natural Language Prescribing</h3>
-          <p>Physician types a drug name; the agent resolves it to the right RxNorm concept, builds the FHIR order, and writes it into the patient's record.</p>
+          <h3>Chest X-ray Image Analysis</h3>
+          <p>Using NV-Reason-CXR-3B, the agent analyzes chest X-rays and reports on the findings.</p>
         </div>
       </article>
     </div>

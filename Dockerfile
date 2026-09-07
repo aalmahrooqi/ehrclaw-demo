@@ -552,6 +552,9 @@ RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes plugins enable observabil
 # keeping the identity slot unmodified.
 # Running as USER sandbox here, so --chown keeps these readable/writable by the agent.
 RUN mkdir -p /sandbox/.hermes/memories
+# Drop-off point for chest X-ray images used by the nv-reason-cxr skill; the
+# operator fills it with `openshell sandbox upload hermes-health <file> /sandbox/cxr/`.
+RUN mkdir -p /sandbox/cxr
 COPY --chown=sandbox:sandbox health-demo/SOUL.md /sandbox/.hermes/SOUL.md
 COPY --chown=sandbox:sandbox health-demo/skills/ /sandbox/.hermes/skills/
 

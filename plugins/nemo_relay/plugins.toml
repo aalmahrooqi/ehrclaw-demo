@@ -34,9 +34,15 @@ mode = "builtin"
 action = "mask"
 pattern = '\b(?:(?:19|20)\d{2}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:(?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2]))[-/.](?:19|20)\d{2})\b'
 
+# Managed (adaptive) tool/LLM execution is disabled: the relay plugin bridges
+# its async managed path from a sync middleware hook by running each call in a
+# new thread with a new event loop, so tools whose awaitables belong to Hermes's
+# main loop fail with "got Future <...> attached to a different loop" — hitting
+# skill_view and vision_analyze mid-turn. With this off, the middleware calls
+# tools directly and the pre/post hooks still emit the same tool and LLM spans.
 [[components]]
 kind = "adaptive"
-enabled = true
+enabled = false
 
 [components.config.tool_parallelism]
 mode = "observe_only"
