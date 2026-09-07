@@ -120,7 +120,7 @@ To stop the FHIR server, the dashboard, and the local vLLM container:
 A lightweight web dashboard for watching the agent work and interacting with it. It has three tabs:
 
 - **traces** — live stream of the agent's [ATOF](https://docs.nvidia.com/nemo/relay/) trace events (LLM calls, tool/skill usage, guardrail checks) from the sandbox, with a per-file browser, pretty JSON rendering, and raw `.jsonl` download.
-- **chat** — a custom chat UI that talks to the Hermes agent through the gateway, with streaming responses.
+- **chat** — a custom chat UI that talks to the Hermes agent through the gateway, with streaming responses. Attach a PNG/JPEG with 📎, drag-and-drop, or paste, and it lands in `/sandbox/cxr/` for the chest X-ray skill.
 - **hermes** — the native Hermes dashboard, embedded.
 
 With the `hermes-health` sandbox running, start it with Docker Compose:
@@ -170,6 +170,29 @@ Fetches FDA drug labeling for a known RxCUI from [openFDA](https://open.fda.gov/
 ### Clinical Trial Cohort Prescreener
 
 Prescreens patients in the FHIR dataset against a single clinical trial's inclusion/exclusion criteria (supplied as text) and reports **potential matches** with supporting evidence. Builds on the FHIR Data Access skill: it derives a coarse candidate cohort (by condition, age, and sex), evaluates each criterion against the record, and returns a per-patient result matrix. It never declares a patient definitively *eligible* — final eligibility must be confirmed by the trial research team.
+
+### Chest X-ray Reasoning (NV-Reason-CXR)
+
+Interprets a chest X-ray image with [NV-Reason-CXR-3B](https://github.com/NVIDIA-Medtech/NV-Reason-CXR): findings, support devices, answers to a specific question about the film, or a structured radiology-style report. The wrapper script under `scripts/` is vendored unmodified from [NVIDIA-Medtech/medical-AI-skills](https://github.com/NVIDIA-Medtech/medical-AI-skills/tree/dev/skills/nv-reason-cxr) (Apache-2.0).
+
+Inference runs against the public [NV-Reason-CXR Hugging Face Space](https://huggingface.co/spaces/nvidia/nv-reason-cxr), which the wrapper reaches with Python's standard library alone — no model weights, GPU passthrough, or Hugging Face token inside the sandbox. The Space is allowlisted for the sandbox's python binaries in `policy/policy.yaml`; the upstream `--backend local` path needs torch, CUDA, and the 3B weights and is not wired up here. Model weights are covered by the NVIDIA OneWay Noncommercial License Agreement.
+
+This skill reads pixels from a file and has no link to the FHIR server — the Synthea `ImagingStudy` resources are DICOM metadata with no image data. Images live in `/sandbox/cxr/` inside the sandbox.
+
+The easiest way in is the dashboard **chat** tab: click 📎 (or drag an image onto the page, or paste one from the clipboard). The dashboard writes it to `/sandbox/cxr/` and appends the sandbox path to your message, so you can just say "what do you see?" with the file attached. From a host terminal the equivalent is:
+
+```bash
+openshell sandbox upload hermes-health ./my-cxr.png /sandbox/cxr/my-cxr.png
+```
+
+Either way, the agent works from the path:
+
+```text
+> analyze the chest x-ray at /sandbox/cxr/my-cxr.png
+> write a structured report for /sandbox/cxr/my-cxr.png
+```
+
+Output is AI-generated engineering evidence, not a diagnosis or a radiology read.
 
 ## Disclaimers
 *This demo is not intended to be used in a clinical setting or for actual patient care. It is a technical demonstration only and does not provide medical advice, diagnosis, or treatment. All patient records are synthetic and do not represent real individuals. This product uses publicly available data from the U.S. National Library of Medicine (NLM), National Institutes of Health, Department of Health and Human Services; NLM is not responsible for the product and does not endorse or recommend this or any other product.*
