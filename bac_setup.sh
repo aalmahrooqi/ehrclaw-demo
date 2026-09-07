@@ -82,14 +82,14 @@ fi
 
 # ── 3. Load the Synthea bundles ────────────────────────────────────────────
 # load_synthea.py waits for the server to accept requests before uploading.
-# if [ "${SKIP_LOAD}" -eq 1 ]; then
-#     echo "--- Skipping the data load (--skip-load) ---"
-# else
-#     # sleep for 30 s
-#     sleep 30
-#     echo "--- Loading the Synthea bundles (takes a few minutes) ---"
-#     python3 scripts/load_synthea.py --data-dir data
-# fi
+if [ "${SKIP_LOAD}" -eq 1 ]; then
+    echo "--- Skipping the data load (--skip-load) ---"
+else
+    # sleep for 30 s
+    sleep 30
+    echo "--- Loading the Synthea bundles (takes a few minutes) ---"
+    python3 scripts/load_synthea.py --data-dir data
+fi
 
 # ── 4. Local vLLM ──────────────────────────────────────────────────────────
 if [ "${SKIP_VLLM}" -eq 1 ]; then
