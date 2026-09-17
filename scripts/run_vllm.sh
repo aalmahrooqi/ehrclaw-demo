@@ -1,6 +1,6 @@
 mkdir -p ~/hf-cache
 
-docker run --rm --name qwen36-vllm \
+docker run -d --name qwen36-vllm \
   --gpus all \
   --ipc=host \
   -p 8000:8000 \
