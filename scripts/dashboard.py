@@ -1897,7 +1897,7 @@ function renderLLM(body, s, e) {
     if (am.tool_calls && am.tool_calls.length) {
       const sec = section('Tool calls (' + am.tool_calls.length + ')');
       am.tool_calls.forEach(tc => {
-        const fn = tc.function || {};
+        const fn = (tc && tc.function) || tc || {};
         let args = fn.arguments;
         try { args = JSON.parse(args); } catch (err) { /* leave as string */ }
         const card = el('div', 'tcall');
@@ -2060,7 +2060,7 @@ function summarize(s, e) {
   if (s.category === 'llm') {
     const am = e && e.data && e.data.assistant_message;
     if (am && am.tool_calls && am.tool_calls.length)
-      return '→ ' + am.tool_calls.map(t => (t.function && t.function.name) || '?').join(', ');
+      return '→ ' + am.tool_calls.map(t => (t && ((t.function && t.function.name) || t.name)) || '?').join(', ');
     if (am && am.content && am.content.trim()) return clip(am.content, 160);
     if (am && am.reasoning_content) return clip(am.reasoning_content, 160);
     return e ? 'llm response' : 'llm request…';
@@ -2333,6 +2333,7 @@ CHAT_HTML = r"""<!DOCTYPE html>
   .md h1 { font-size: 19px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15px; }
   .md h4, .md h5, .md h6 { font-size: 13px; } .md h1, .md h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
   .md strong { color: var(--text); font-weight: 700; }
+  .md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .md code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
              font: 12px/1.4 "SF Mono",ui-monospace,Menlo,Consolas,monospace; }
   .md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
@@ -2448,7 +2449,7 @@ function setSession(id) {
   el.textContent = sessionId ? ('session ' + sessionId.slice(0, 8)) : '';
 }
 
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function mdLite(text) {
   const lines = esc(text).split(/\r?\n/);
   let html = '', inUl = false, inOl = false, inCode = false, code = '', inBq = false;
@@ -2457,7 +2458,11 @@ function mdLite(text) {
     if (inOl) { html += '</ol>'; inOl = false; }
     if (inBq) { html += '</blockquote>'; inBq = false; }
   };
-  const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  const inline = s => s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   // GitHub-style pipe tables
   const isSep = s => /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(s) && s.includes('-');
   const isRow = s => /^\s*\|?.+\|/.test(s) && s.includes('|') && s.trim() !== '';
