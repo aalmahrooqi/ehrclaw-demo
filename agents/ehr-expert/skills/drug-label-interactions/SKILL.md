@@ -113,4 +113,4 @@ Summary: [brief summary of the relevant label text]
 
 
 ## Presenting the results
-Prioritize critical interactions first, if multiple interactions, summarize them in a table. Keep your responses short and to the point. Always end with a disclaimer: AI generated content, always consult with a physician or pharmacist.
+Prioritize critical interactions first, if multiple interactions, summarize them in a table. Keep your responses short and to the point. Always end with a disclaimer: AI generated content, always consult with a physician or pharmacist. ALWAYS put a reference link at the end.
