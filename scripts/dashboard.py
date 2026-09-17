@@ -1326,7 +1326,7 @@ SHELL_HTML = r"""<!DOCTYPE html>
   html, body { height: 100%; margin: 0; }
   body { font: 14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
          background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
-  .topbar { flex: none; background: linear-gradient(180deg,var(--header-a),var(--header-b));
+  .topbar { position: relative; flex: none; background: linear-gradient(180deg,var(--header-a),var(--header-b));
             border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 14px; }
   .brand { font-size: 14px; font-weight: 700; letter-spacing: .3px; display: flex; align-items: center; gap: 8px; }
   .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
@@ -1335,8 +1335,9 @@ SHELL_HTML = r"""<!DOCTYPE html>
          border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
   .tab:hover { color: var(--text); }
   .tab.active { background: var(--accent); color: #fff; border-color: transparent; }
-  .spacer { flex: 1; }
-  .chip { cursor: pointer; user-select: none; padding: 5px 10px; border-radius: 7px; font-size: 12px;
+  .disclaimer { position: absolute; left: 50%; transform: translateX(-50%); color: var(--muted);
+                font-size: 14px; text-align: center; white-space: nowrap; }
+  .chip { margin-left: auto; cursor: pointer; user-select: none; padding: 5px 10px; border-radius: 7px; font-size: 12px;
           border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
   .chip:hover { color: var(--text); }
   .views { position: relative; flex: 1; min-height: 0; }
@@ -1355,7 +1356,7 @@ SHELL_HTML = r"""<!DOCTYPE html>
     <div class="tab" data-view="hermes">⚕ hermes</div>
     <div class="tab" data-view="traces">📡 traces</div>
   </nav>
-  <div class="spacer"></div>
+  <div class="disclaimer">⚠️ This demo is intended for educational and research purposes only.</div>
   <button class="chip" id="themeToggle" title="toggle light / dark">🌙 dark</button>
 </div>
 <div class="views" id="views">
