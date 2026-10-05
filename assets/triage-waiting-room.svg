@@ -1,0 +1,301 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 650" shape-rendering="crispEdges">
+  <!-- #night is selected by the dashboard theme; both views use the same geometry. -->
+  <style>
+    .night-detail { display:none }
+    #night:target ~ .room-art, body:not(.light) .game-aquarium {
+      --tile:#354650;
+      --tile-alt:#30414b;
+      --grout:#283842;
+      --outline:#111c28;
+      --wall:#293a4c;
+      --rail:#547079;
+      --baseboard:#1d303c;
+      --floor-edge:#49616b;
+      --ceiling:#405569;
+      --window-frame:#627887;
+      --window-recess:#172738;
+      --sky:#101c32;
+      --skyline:#263b53;
+      --window-bars:#788b97;
+      --window-sill:#91a3ad;
+      --door-frame:#172d35;
+      --door:#375e65;
+      --door-trim:#62818a;
+      --door-glass:#abc8c7;
+      --medical-cross:#436c70;
+      --door-step:#bdac7a;
+      --office-sign:#ffde9b;
+      --office-lettering:#354448;
+      --route:#8fa9a4;
+      --tank-frame:#243d4b;
+      --tank-cabinet:#3e5863;
+      --tank-rim:#3c747e;
+      --tank-water:#4babae;
+      --tank-light:#b3efda;
+      --tank-sand:#839e90;
+      --tank-plant:#347b6f;
+      --tank-bubbles:#b3efed;
+      --object-shadow:#24343c;
+      --vending-body:#3e5963;
+      --vending-sign:#f7d699;
+      --vending-glass:#182f3c;
+      --vending-shelf:#688589;
+      --vending-buttons:#90aaa9;
+      --footer:#94a9b4;
+      --wifi-frame:#45616d;
+      --wifi-sign:#a4b8b7;
+    }
+    #night:target ~ .room-art .day-detail { display:none }
+    #night:target ~ .room-art .night-detail { display:inline }
+    #night:target ~ .room-art .ambient { filter:brightness(.64) saturate(.75) }
+    /* The dashboard inlines the aquarium so the browser can animate its contents. */
+    @media (prefers-reduced-motion: no-preference) {
+      .game-aquarium .tank-fish-large { animation:tank-swim-large 12s steps(18,end) -4s infinite }
+      .game-aquarium .tank-fish-large .tank-fish-facing { animation:tank-turn 12s steps(1,end) -4s infinite }
+      .game-aquarium .tank-fish-small { animation:tank-swim-small 15s steps(18,end) -9s infinite }
+      .game-aquarium .tank-fish-small .tank-fish-facing { animation:tank-turn 15s steps(1,end) -9s infinite }
+      .game-aquarium .tank-bubble { animation:tank-bubble-rise 4s steps(28,end) -1.8s infinite }
+      .game-aquarium .tank-bubble:nth-child(2) { animation-duration:4.8s; animation-delay:-3.2s }
+      .game-aquarium .tank-bubble:nth-child(3) { animation-duration:3.6s; animation-delay:-.5s }
+    }
+    @keyframes tank-swim-large {
+      0%,100% { transform:translate(104px,28px) }
+      25% { transform:translate(68px,24px) }
+      50% { transform:translate(32px,28px) }
+      75% { transform:translate(68px,32px) }
+    }
+    @keyframes tank-swim-small {
+      0%,100% { transform:translate(118px,49px) }
+      25% { transform:translate(82px,46px) }
+      50% { transform:translate(46px,49px) }
+      75% { transform:translate(82px,52px) }
+    }
+    @keyframes tank-turn {
+      0%,100% { transform:scaleX(1) }
+      50% { transform:scaleX(-1) }
+    }
+    @keyframes tank-bubble-rise {
+      0% { transform:translate(0,60px); opacity:0 }
+      8%,85% { opacity:.85 }
+      100% { transform:translate(2px,8px); opacity:0 }
+    }
+  </style>
+  <view id="night" viewBox="0 0 1120 650"/>
+  <g class="room-art">
+  <defs>
+    <pattern id="tiles" width="64" height="48" patternUnits="userSpaceOnUse">
+      <rect width="64" height="48" fill="var(--tile,#c8d2bc)"/>
+      <path d="M0 0H32V24H0ZM32 24H64V48H32Z" fill="var(--tile-alt,#c0cdb6)"/>
+      <path d="M0 0H64M0 24H64M0 0V48M32 0V48" fill="none" stroke="var(--grout,#b7c6ab)"/>
+    </pattern>
+    <g id="plant">
+      <rect x="15" y="26" width="6" height="23" fill="#466f45"/>
+      <path d="M9 0H21V7H27V23H21V35H15V29H9V19H3V7H9Z" fill="#678f50"/>
+      <path d="M27 12H39V30H33V36H21V24H27Z" fill="#85a858"/>
+      <rect x="9" y="45" width="27" height="6" fill="#ae7551"/><rect x="12" y="51" width="21" height="18" fill="#cb9168"/>
+      <rect x="12" y="65" width="21" height="5" fill="#ad7855"/>
+    </g>
+    <!-- Reusable low table with a stack, an open magazine, and a colorful cover. -->
+    <g id="magazine-table">
+      <rect x="-5" y="44" width="206" height="7" fill="var(--object-shadow,#9bae9e)"/>
+      <rect x="13" y="10" width="10" height="36" fill="#7f725b"/>
+      <rect x="173" y="10" width="10" height="36" fill="#7f725b"/>
+      <rect x="16" y="13" width="3" height="30" fill="#b59e77"/>
+      <rect x="176" y="13" width="3" height="30" fill="#b59e77"/>
+      <rect x="20" y="31" width="156" height="5" fill="#958365"/>
+      <path d="M4-4H192V0H196V14H0V0H4Z" fill="#a9916d"/>
+      <rect x="4" y="-4" width="188" height="9" fill="#c5b38a"/>
+      <rect x="7" y="-4" width="182" height="2" fill="#decea6"/>
+      <!-- Offset magazine stack, with visible page edges. -->
+      <rect x="20" y="-10" width="34" height="9" fill="var(--magazine-stack,#709aaa)"/>
+      <rect x="22" y="-7" width="30" height="3" fill="#ede5ca"/>
+      <rect x="25" y="-15" width="31" height="8" fill="#dbb570"/>
+      <rect x="28" y="-12" width="24" height="2" fill="#f7edcf"/>
+      <!-- Open spread and center fold. -->
+      <path d="M75-17H96L100-14L104-17H125V0H104L100 3L96 0H75Z" fill="#eee6cf"/>
+      <path d="M100-13V1M81-11H94M81-7H94M81-3H91M107-5H120M107-1H117" fill="none" stroke="#ab9d7c" stroke-width="2"/>
+      <rect x="107" y="-12" width="13" height="5" fill="#83a7a2"/>
+      <!-- A separate cover, with a title stripe and tiny picture. -->
+      <rect x="147" y="-20" width="28" height="21" fill="var(--magazine-cover,#c7917c)"/>
+      <path d="M151-16H171M151-3H167" stroke="#f5e7be" stroke-width="2"/>
+      <rect x="151" y="-12" width="8" height="6" fill="#e1c99a"/>
+      <path d="M163-11H171M163-7H169" stroke="#ead9b1" stroke-width="2"/>
+    </g>
+  </defs>
+  <!-- Taller room, with a clear aisle between intake and the two bench banks. -->
+  <path d="M12 0H1108V12H1120V638H1108V650H12V638H0V12H12Z" fill="var(--outline,#283f37)"/>
+  <rect x="12" y="12" width="1096" height="232" fill="var(--wall,#e1e7d4)"/>
+  <rect x="12" y="242" width="1096" height="396" fill="url(#tiles)"/>
+  <rect x="12" y="228" width="1096" height="12" fill="var(--rail,#83987c)"/>
+  <rect x="12" y="240" width="1096" height="10" fill="var(--baseboard,#526f58)"/>
+  <rect x="12" y="250" width="1096" height="5" fill="var(--floor-edge,#adbca1)"/>
+  <rect x="12" y="12" width="1096" height="6" fill="var(--ceiling,#f1f0df)"/>
+  <!-- Moonlight and small pools of warm light stay crisp, like the pixel artwork. -->
+  <g class="night-detail">
+    <path d="M598 255H752L865 335H665Z" fill="#a9cce8" opacity=".06"/>
+    <path d="M971 251H1074L1100 318H941Z" fill="#ffd68c" opacity=".09"/>
+    <path d="M65 519H124L151 628H37Z" fill="#ffd68c" opacity=".06"/>
+    <path d="M138 205H310L369 296H91Z" fill="#ffd68c" opacity=".06"/>
+    <g transform="translate(0 76)">
+    <rect x="372" y="109" width="60" height="56" fill="#ffd68c" opacity=".04"/>
+    <rect x="383" y="116" width="38" height="38" fill="#ffd68c" opacity=".08"/>
+    <rect x="397" y="107" width="10" height="13" fill="#566675"/>
+    <rect x="387" y="118" width="30" height="7" fill="#bd9c6e"/>
+    <rect x="390" y="125" width="24" height="8" fill="#ffdda0"/>
+    <rect x="393" y="133" width="18" height="3" fill="#f7bd77"/>
+    </g>
+  </g>
+  <!-- Window with a daytime skyline or a crescent moon and stars. -->
+  <g transform="translate(590 45)">
+    <rect width="170" height="92" fill="var(--window-frame,#647e6c)"/>
+    <rect x="6" y="6" width="158" height="80" fill="var(--window-recess,#b7d9d2)"/>
+    <rect x="12" y="12" width="146" height="64" fill="var(--sky,#c8e5de)"/>
+    <path d="M12 66H34V54H50V60H74V48H94V66H120V56H142V62H158V80H12Z" fill="var(--skyline,#90b4a1)"/>
+    <rect class="day-detail" x="124" y="16" width="20" height="20" fill="#f2d98d"/>
+    <path class="day-detail" d="M26 26H38V20H54V26H66V34H26Z" fill="#f4f5e7"/>
+    <g class="night-detail">
+      <path d="M127 14H141V19H136V29H141V34H127V29H122V19H127Z" fill="#f8e8b2"/>
+      <path d="M30 18V26M26 22H34M103 31V37M100 34H106" stroke="#d6e9ed" stroke-width="2"/>
+      <g fill="#b6cddd"><rect x="63" y="15" width="3" height="3"/><rect x="53" y="38" width="2" height="2"/><rect x="149" y="42" width="2" height="2"/></g>
+      <g fill="#d9bd7e"><rect x="38" y="58" width="3" height="4"/><rect x="79" y="53" width="3" height="4"/><rect x="129" y="61" width="3" height="4"/></g>
+    </g>
+    <rect x="82" y="6" width="6" height="80" fill="var(--window-bars,#f2f1df)"/>
+    <rect y="44" width="170" height="6" fill="var(--window-bars,#f2f1df)"/>
+    <rect x="-6" y="88" width="182" height="8" fill="var(--window-sill,#f3f1e1)"/>
+  </g>
+  <!-- Tiny encouragement poster and clock. -->
+  <g class="ambient" transform="translate(795 55)">
+    <rect width="64" height="88" fill="#819781"/><rect x="4" y="4" width="56" height="80" fill="#fbf1d6"/>
+    <path d="M17 22H26V18H38V22H47V35H42V41H22V35H17Z" fill="#dda88a"/>
+    <text x="32" y="58" text-anchor="middle" fill="#58705a" font-family="monospace" font-size="8" font-weight="bold">TAKE A</text>
+    <text x="32" y="71" text-anchor="middle" fill="#58705a" font-family="monospace" font-size="9" font-weight="bold">BREATH</text>
+  </g>
+  <g class="ambient" transform="translate(888 53)">
+    <path d="M6 0H34V6H40V34H34V40H6V34H0V6H6Z" fill="#738670"/>
+    <rect x="6" y="6" width="28" height="28" fill="#fcf6df"/>
+    <path d="M20 10V22H30" fill="none" stroke="#385247" stroke-width="4"/>
+  </g>
+  <!-- First in line sits nearest the doctor's office. -->
+  <g transform="translate(954 62)">
+    <rect width="136" height="186" fill="var(--door-frame,#426358)"/>
+    <rect x="8" y="8" width="120" height="170" fill="var(--door,#77a496)"/>
+    <rect x="16" y="16" width="104" height="12" fill="var(--door-trim,#a2c3ab)"/>
+    <rect x="27" y="44" width="82" height="60" fill="var(--door-glass,#d6e7da)"/>
+    <rect x="63" y="57" width="12" height="34" fill="var(--medical-cross,#6d9985)"/>
+    <rect x="52" y="68" width="34" height="12" fill="var(--medical-cross,#6d9985)"/>
+    <rect x="16" y="131" width="6" height="14" fill="#ecce80"/>
+    <rect y="182" width="136" height="8" fill="var(--door-step,#e8e5ce)"/>
+    <rect x="16" y="-30" width="104" height="28" fill="var(--office-sign,#f5ecca)"/>
+    <text x="68" y="-10" text-anchor="middle" fill="var(--office-lettering,#355348)" font-family="monospace" font-size="17" font-weight="bold" letter-spacing="2">DOCTOR</text>
+  </g>
+  <path d="M990 328V291H1022V266" fill="none" stroke="var(--route,#789776)" stroke-width="4" stroke-dasharray="7 7"/>
+  <path d="M1013 273L1022 264L1031 273" fill="none" stroke="var(--route,#789776)" stroke-width="4"/>
+  <!-- Aquarium: two fish, plants, bubbles, and the tiniest rubber duck. -->
+  <g id="aquarium" transform="translate(633 185)">
+    <defs>
+      <g id="fish">
+        <path d="M0 6H6V3H18V6H24V15H18V18H6V15H0ZM24 9L33 3V18L24 12Z" fill="#efb866"/>
+        <rect x="6" y="7" width="3" height="3" fill="#365650"/>
+        <rect x="12" y="3" width="6" height="3" fill="#ffe0a0"/>
+      </g>
+      <clipPath id="tank-water-clip"><rect x="5" y="6" width="150" height="58"/></clipPath>
+    </defs>
+    <rect x="-6" y="75" width="178" height="10" fill="var(--tank-frame,#607c70)"/>
+    <rect x="2" y="85" width="162" height="34" fill="var(--tank-cabinet,#8ba08b)"/>
+    <rect x="10" y="117" width="8" height="12" fill="var(--tank-frame,#607c70)"/><rect x="148" y="117" width="8" height="12" fill="var(--tank-frame,#607c70)"/>
+    <rect width="160" height="76" fill="var(--tank-rim,#557c79)"/><rect x="5" y="6" width="150" height="64" fill="var(--tank-water,#9acbc2)"/>
+    <rect x="10" y="12" width="140" height="4" fill="var(--tank-light,#d1e8d9)"/>
+    <rect x="5" y="64" width="150" height="6" fill="var(--tank-sand,#d4d5a2)"/>
+    <path d="M20 64V43H15V35M20 52H29V36M134 64V34H128V26M134 49H143V38" fill="none" stroke="var(--tank-plant,#5b9a78)" stroke-width="5"/>
+    <g clip-path="url(#tank-water-clip)">
+      <g class="tank-fish-large" transform="translate(54 37)">
+        <g class="tank-fish-facing"><use href="#fish" x="-16" y="-10"/></g>
+      </g>
+      <g class="tank-fish-small" transform="translate(110 51)">
+        <g class="tank-fish-facing" transform="scale(-1 1)"><g transform="scale(.7)"><use href="#fish" x="-16" y="-10"/></g></g>
+      </g>
+      <g fill="var(--tank-bubbles,#d4e9dc)">
+        <g class="tank-bubble" transform="translate(0 24)"><rect x="86" width="4" height="4"/></g>
+        <g class="tank-bubble" transform="translate(0 14)"><rect x="92" width="3" height="3"/></g>
+        <g class="tank-bubble" transform="translate(0 39)"><rect x="83" width="3" height="3"/></g>
+      </g>
+    </g>
+    <path d="M114-10H122V-18H131V-7H137V0H116Z" fill="#f2cf69"/><rect x="129" y="-14" width="2" height="2" fill="var(--door-frame,#426358)"/><rect x="132" y="-10" width="6" height="3" fill="#d99951"/>
+  </g>
+  <!-- Water cooler and guest Wi-Fi near reception. -->
+  <g class="ambient" transform="translate(60 300)">
+    <rect x="-6" y="87" width="65" height="6" fill="var(--object-shadow,#9bae9e)"/>
+    <rect x="7" y="-24" width="32" height="32" fill="#9cc8ce"/><rect x="12" y="-30" width="22" height="6" fill="#79a3b5"/>
+    <rect x="11" y="-19" width="5" height="21" fill="#d0e7e6"/>
+    <rect width="48" height="85" fill="#dde6dd"/><rect x="4" y="8" width="40" height="9" fill="#afc4bc"/>
+    <rect x="9" y="29" width="30" height="29" fill="#77958c"/>
+    <rect x="12" y="27" width="6" height="6" fill="#82abc0"/><rect x="30" y="27" width="6" height="6" fill="#d49588"/>
+    <rect x="21" y="44" width="9" height="12" fill="#fcf5df"/><rect x="5" y="78" width="38" height="7" fill="#acc1b8"/>
+  </g>
+  <g transform="translate(59 42)">
+    <rect width="138" height="30" fill="var(--wifi-frame,#b1c4ad)"/><rect x="3" y="3" width="132" height="24" fill="var(--wifi-sign,#f1efdc)"/>
+    <text x="69" y="19" text-anchor="middle" fill="#58705a" font-family="monospace" font-size="10" font-weight="bold">WI-FI: ItHurtsWhenIP</text>
+  </g>
+  <!-- Floor-standing indoor palm; pot and contact shadow meet the floor below the baseboard. -->
+  <g id="floor-palm" transform="translate(16 90)">
+    <path d="M26 166H70V170H78V174H20V170H26Z" fill="var(--object-shadow,#9bae9e)"/>
+    <g class="ambient">
+      <!-- Stepped trunks and rings, kept on the room's integer pixel grid. -->
+      <path d="M44 38H50V88H54V148H44V96H40V62H44Z" fill="#93734d"/>
+      <path d="M44 50H47V94H50V148H46V98H43V62H44Z" fill="#c2a16a"/>
+      <path d="M41 78H49V82H41ZM44 100H53V104H44ZM44 122H54V126H44Z" fill="#725d3f"/>
+      <path d="M30 74H35V106H40V126H46V148H41V130H35V110H30Z" fill="#758052"/>
+      <!-- Arching, feather-like fronds with deliberately chunky pixel tips. -->
+      <path d="M46 40H38V28H26V22H14V28H8V40H2V48H0V30H6V20H14V14H28V20H38V26H46Z" fill="#4e7947"/>
+      <path d="M48 38H56V26H66V18H80V22H90V30H96V44H102V32H98V22H90V14H78V10H64V16H54V24H48Z" fill="#678f50"/>
+      <path d="M44 42H32V46H20V54H14V66H8V84H4V62H10V48H20V40H34V36H44Z" fill="#678f50"/>
+      <path d="M50 42H66V46H80V54H88V66H94V86H98V64H92V50H80V42H66V36H50Z" fill="#4e7947"/>
+      <path d="M46 36H40V22H34V12H28V4H34V0H40V12H46V24H50V36Z" fill="#85a858"/>
+      <path d="M50 38H56V22H62V12H70V4H80V10H72V18H64V30H58V42H50Z" fill="#9ab768"/>
+      <path d="M46 46H38V58H30V74H24V94H20V72H24V54H32V42H46Z" fill="#85a858"/>
+      <path d="M50 44H58V54H64V70H68V92H62V76H58V60H52V52H48Z" fill="#678f50"/>
+      <path d="M14 22H24V26H14ZM26 28H34V32H26ZM66 20H78V24H66ZM80 26H88V30H80ZM20 48H28V52H20ZM72 48H80V52H72Z" fill="#9ab768"/>
+      <rect x="42" y="36" width="12" height="12" fill="#5c8247"/>
+      <!-- Wide rim, visible soil, shaded terracotta body, and a grounded base. -->
+      <rect x="26" y="140" width="44" height="8" fill="#ad7855"/>
+      <rect x="30" y="141" width="36" height="4" fill="#5e513e"/>
+      <rect x="30" y="148" width="36" height="14" fill="#cb9168"/>
+      <rect x="34" y="162" width="28" height="8" fill="#cb9168"/>
+      <rect x="30" y="148" width="6" height="14" fill="#dfac7d"/>
+      <rect x="34" y="162" width="5" height="4" fill="#dfac7d"/>
+      <rect x="60" y="148" width="6" height="14" fill="#ad7855"/>
+      <rect x="54" y="162" width="8" height="8" fill="#ad7855"/>
+      <rect x="34" y="167" width="28" height="3" fill="#946548"/>
+    </g>
+  </g>
+  <use class="ambient" href="#plant" transform="translate(860 223) scale(1.15)"/>
+  <!-- Snack machine in the foreground corner. -->
+  <g transform="translate(50 489)">
+    <rect x="-5" y="112" width="85" height="6" fill="var(--object-shadow,#9bae9e)"/>
+    <rect width="76" height="110" fill="var(--vending-body,#597a71)"/><rect x="5" y="5" width="66" height="20" fill="var(--vending-sign,#f3e6b4)"/>
+    <text x="38" y="19" text-anchor="middle" fill="#4e6b59" font-family="monospace" font-size="11" font-weight="bold">SNACKS</text>
+    <rect x="7" y="31" width="45" height="52" fill="var(--vending-glass,#294e48)"/>
+    <g fill="#dbb570"><rect x="13" y="37" width="9" height="14"/><rect x="37" y="58" width="9" height="14"/></g>
+    <g fill="#b4c88b"><rect x="25" y="37" width="9" height="14"/><rect x="13" y="58" width="9" height="14"/></g>
+    <g fill="#d89c87"><rect x="37" y="37" width="9" height="14"/><rect x="25" y="58" width="9" height="14"/></g>
+    <path d="M7 54H52M7 76H52" stroke="var(--vending-shelf,#8ea18b)" stroke-width="3"/>
+    <rect x="59" y="35" width="8" height="8" fill="#c8dfb1"/><path d="M60 51H67M60 58H67M60 65H67" stroke="var(--vending-buttons,#b6c7ad)" stroke-width="3"/>
+    <rect x="16" y="92" width="44" height="9" fill="var(--vending-glass,#294e48)"/>
+  </g>
+  <!-- Centered in front of the two three-seat bench banks (x=380 and x=844). -->
+  <use class="ambient" href="#magazine-table" x="282" y="560"/>
+  <use class="ambient" href="#magazine-table" x="746" y="560" style="--magazine-cover:#83a181;--magazine-stack:#bf956b"/>
+  <!-- Framed staff notice above the nurse station, clear of the chat bubble. -->
+  <g id="welcome-sign" class="ambient" transform="translate(224 20)">
+    <rect x="3" y="4" width="340" height="42" fill="#536f61" opacity=".3"/>
+    <rect width="340" height="42" fill="#7f9e89"/>
+    <rect x="3" y="3" width="334" height="36" fill="#e8eddb"/>
+    <rect x="7" y="6" width="326" height="2" fill="#f5f5e9"/>
+    <text x="170" y="21" text-anchor="middle" fill="#3e5749" font-family="monospace" font-size="13" font-weight="bold">Anti Shellfish Discrimination</text>
+    <text x="170" y="34" text-anchor="middle" fill="#3e5749" font-family="monospace" font-size="12" font-weight="bold">will not be tolerated</text>
+  </g>
+  <!-- Uncluttered floor corner with the existing potted plant. -->
+  <use class="ambient" href="#plant" transform="translate(1042 529) scale(1.2)"/>
+  <text x="560" y="635" text-anchor="middle" fill="var(--footer,#607d62)" font-family="monospace" font-size="10" font-weight="bold" letter-spacing="3">CLINICLAW COMMUNITY CLINIC</text>
+  </g>
+</svg>

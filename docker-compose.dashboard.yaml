@@ -17,10 +17,11 @@ services:
       ATOF_SANDBOX: ${ATOF_SANDBOX:-hermes-health}
       ATOF_DIR: ${ATOF_DIR:-/sandbox/.nemo-relay/atof}
       HERMES_MEMORIES_DIR: ${HERMES_MEMORIES_DIR:-/sandbox/.hermes/memories}
+      HERMES_SOUL_FILE: ${HERMES_SOUL_FILE:-/sandbox/.hermes/SOUL.md}
       HERMES_SKILLS_DIR: ${HERMES_SKILLS_DIR:-/sandbox/.hermes/skills}
       # Only these skills appear under "Agent Custom Skills" (comma/space
       # separated; match by skill dir id or leaf name under HERMES_SKILLS_DIR).
-      HERMES_CUSTOM_SKILLS: ${HERMES_CUSTOM_SKILLS:-summarize-patient-chart,fhir-data-access,fhir-medication-request-write,clinical-trial-cohort-prescreener,drug-label-interactions,rxnorm-resolve-rxcui,nv-reason-cxr}
+      HERMES_CUSTOM_SKILLS: ${HERMES_CUSTOM_SKILLS:-summarize-intake-transcript,summarize-patient-chart,fhir-data-access,fhir-medication-request-write,clinical-trial-cohort-prescreener,drug-label-interactions,rxnorm-resolve-rxcui,nv-reason-cxr}
       # Persist the learning-activity / skill-evolution feeds so they survive a
       # restart (stored in the named volume below).
       DASHBOARD_STATE_DIR: ${DASHBOARD_STATE_DIR:-/app/state}

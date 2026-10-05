@@ -5,6 +5,10 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY scripts/dashboard.py /app/dashboard.py
 COPY assets/architecture.png /app/assets/architecture.png
+COPY assets/hermes-logo.png /app/assets/hermes-logo.png
+COPY assets/openshell-logo.png /app/assets/openshell-logo.png
+COPY assets/avatar-clinician.svg assets/avatar-cliniclaw.svg /app/assets/
+COPY assets/triage-waiting-room.svg assets/waiting-room-dialogue.json /app/assets/
 
 EXPOSE 8090
 

@@ -5,7 +5,7 @@ docker run -d --name qwen36-vllm \
   --ipc=host \
   -p 8000:8000 \
   -v ~/hf-cache:/root/.cache/huggingface \
-  vllm/vllm-openai:nightly \
+  vllm/vllm-openai:v0.29.0 \
   nvidia/Qwen3.6-35B-A3B-NVFP4 \
     --host 0.0.0.0 \
     --port 8000 \

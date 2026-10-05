@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 40 40" shape-rendering="crispEdges">
+  <title>CliniClaw, the medical lobster</title>
+  <!-- Only the inline desk-avatar animates; other avatars keep the open pose. -->
+  <style>
+    .claw-open { animation:var(--claw-open-motion,none) }
+    .claw-half { opacity:0; animation:var(--claw-half-motion,none) }
+    .claw-closed { opacity:0; animation:var(--claw-closed-motion,none) }
+    @media (prefers-reduced-motion: no-preference) {
+      /* Inherit the motion into the mirrored use element as well. */
+      .desk-avatar {
+        --claw-open-motion:claw-open 3s steps(1,end) infinite;
+        --claw-half-motion:claw-half 3s steps(1,end) infinite;
+        --claw-closed-motion:claw-closed 3s steps(1,end) infinite;
+      }
+    }
+    @keyframes claw-open { 0%,92%,100% { opacity:1 } 76% { opacity:0 } }
+    @keyframes claw-half { 0%,80%,92%,100% { opacity:0 } 76%,88% { opacity:1 } }
+    @keyframes claw-closed { 0%,88%,100% { opacity:0 } 80% { opacity:1 } }
+  </style>
+  <!-- Antennae, little walking legs, and a three-part lobster tail. -->
+  <g fill="#8d4540">
+    <path d="M15 14V8H12V5H8V3H5V1H9V3H14V6H17V14ZM23 14V6H26V3H31V1H35V3H32V5H28V8H25V14Z"/>
+    <path d="M13 30H10V32H7V34H11V33H15ZM27 30H30V32H33V34H29V33H25Z"/>
+    <path d="M15 34H12V36H10V38H14V36H17ZM25 34H28V36H30V38H26V36H23Z"/>
+    <path d="M16 34H24V36H27V39H23V40H17V39H13V36H16Z"/>
+  </g>
+  <path d="M17 35H23V38H21V39H19V38H17ZM14 36H16V38H14ZM24 36H26V38H24Z" fill="#e7795c"/>
+  <path d="M19 36H21V39H19Z" fill="#ffad7b"/>
+  <!-- Elbows connect the raised pincers to the coat sleeves. -->
+  <path d="M8 25H12V28H16V33H12V31H9V28H8ZM28 25H32V28H31V31H28V33H24V28H28Z" fill="#8d4540"/>
+  <path d="M10 26H12V29H15V31H13V30H10ZM28 26H30V30H27V31H25V29H28Z" fill="#e7795c"/>
+  <!-- Three integer-grid pincer poses; the opposite claw mirrors this group. -->
+  <g id="left-claw">
+    <g class="claw-open">
+      <path d="M3 14H6V19H8V15H10V16H12V24H11V27H8V29H4V27H2V24H1V17H3Z" fill="#8d4540"/>
+      <path d="M3 16H5V21H9V17H10V23H9V26H7V27H4V25H3V23H2V18H3Z" fill="#e7795c"/>
+      <path d="M3 17H4V22H3ZM4 23H6V25H4ZM9 18H10V21H9Z" fill="#ffad7b"/>
+    </g>
+    <g class="claw-half">
+      <path d="M4 14H7V18H8V15H10V16H12V24H11V27H8V29H4V27H2V24H1V17H4Z" fill="#8d4540"/>
+      <path d="M4 16H6V20H9V17H10V23H9V26H7V27H4V25H3V23H2V18H4Z" fill="#e7795c"/>
+      <path d="M4 17H5V21H4ZM4 23H6V25H4ZM9 18H10V21H9Z" fill="#ffad7b"/>
+    </g>
+    <g class="claw-closed">
+      <path d="M5 14H8V15H10V16H12V24H11V27H8V29H4V27H2V24H1V17H5Z" fill="#8d4540"/>
+      <path d="M5 16H7V20H9V17H10V23H9V26H7V27H4V25H3V23H2V18H5Z" fill="#e7795c"/>
+      <path d="M5 17H6V21H5ZM4 23H6V25H4ZM9 18H10V21H9Z" fill="#ffad7b"/>
+    </g>
+    <path d="M8 24H10V26H8V27H6V26H8Z" fill="#c65b4d"/>
+  </g>
+  <use href="#left-claw" transform="translate(40 0) scale(-1 1)"/>
+  <!-- Warm coral face, with tall eyes instead of a robot visor. -->
+  <path d="M15 11H25V13H27V16H28V22H26V25H23V27H17V25H14V22H12V16H13V13H15Z" fill="#8d4540"/>
+  <path d="M15 13H25V16H26V22H24V24H22V25H18V24H16V22H14V16H15Z" fill="#e7795c"/>
+  <path d="M15 13H25V15H15ZM14 17H16V21H14ZM17 24H22V25H17Z" fill="#f4936d"/>
+  <g fill="#fff8e9"><rect x="14" y="13" width="5" height="6"/><rect x="21" y="13" width="5" height="6"/></g>
+  <g fill="#493b36"><rect x="16" y="15" width="3" height="4"/><rect x="21" y="15" width="3" height="4"/></g>
+  <g fill="#fff8e9"><rect x="16" y="15" width="1" height="1"/><rect x="21" y="15" width="1" height="1"/></g>
+  <path d="M17 21V23H23V21H22V22H18V21Z" fill="#8d4540"/>
+  <g fill="#ffb589"><rect x="14" y="20" width="2" height="1"/><rect x="24" y="20" width="2" height="1"/></g>
+  <!-- White medical cap with a mint cross. -->
+  <path d="M15 5H25V7H27V12H13V7H15Z" fill="#6b9184"/>
+  <path d="M16 6H24V8H26V11H14V8H16Z" fill="#fffaf0"/>
+  <path d="M19 6H21V8H23V10H21V11H19V10H17V8H19Z" fill="#65a589"/>
+  <!-- White coat, teal scrubs, stethoscope, and a tiny name badge. -->
+  <path d="M15 25H18V26H22V25H25V27H28V35H26V37H14V35H12V27H15Z" fill="#6b9184"/>
+  <path d="M15 26H18V28H22V26H25V28H27V34H25V36H15V34H13V28H15Z" fill="#fffaf0"/>
+  <path d="M18 27H22V36H18Z" fill="#72a99b"/>
+  <path d="M15 26H18V28H20L17 31H16V29H15ZM22 26H25V29H24V31H23L20 28H22Z" fill="#dce9df"/>
+  <path d="M16 28V32H17V33H20V32H21V29" fill="none" stroke="#496e69" stroke-width="1"/>
+  <rect x="19" y="32" width="3" height="3" fill="#496e69"/><rect x="20" y="33" width="1" height="1" fill="#b7d8c5"/>
+  <rect x="23" y="31" width="3" height="3" fill="#b1cdb7"/><rect x="23" y="31" width="3" height="1" fill="#66977f"/>
+</svg>

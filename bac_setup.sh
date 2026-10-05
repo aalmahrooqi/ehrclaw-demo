@@ -21,9 +21,9 @@ VLLM_PORT="${VLLM_PORT:-8000}"
 VLLM_LOG="${SCRIPT_DIR}/logs/vllm.log"
 VLLM_TIMEOUT="${VLLM_TIMEOUT:-3600}"   # the first run also downloads the model weights
 
-SKIP_DATA=0
-SKIP_LOAD=0
-SKIP_VLLM=0
+SKIP_DATA=1
+SKIP_LOAD=1
+SKIP_VLLM=1
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -142,7 +142,7 @@ else
 fi
 
 echo "--- Building the Hermes image and onboarding the sandbox ---"
-./scripts/startup_w_local_model.sh
+./scripts/startup_w_inference_api.sh
 
 echo ""
 echo "============================================="
