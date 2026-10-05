@@ -1890,6 +1890,7 @@ QUEUE_HTML = r"""<!DOCTYPE html>
     .step{font-size:9px}.evidence-grid{grid-template-columns:1fr}.priority-panel{grid-template-columns:auto 1fr}}
   /* Patient focus lives above the room; the shared chat iframe never remounts. */
   body.agent-open .app{margin-right:0}
+  @media(min-width:1280px){body.queue-chat-open .app{margin-right:460px}}
   .agent-panel{inset:0 0 0 auto;margin:0;width:460px;height:100dvh;max-height:none;max-width:100vw;
     padding:0;border:0;border-left:1px solid var(--border);color:var(--text)}
   .agent-panel:not([open]){display:none}
@@ -2830,7 +2831,7 @@ function buildAgentPrompt(c){
     "NURSE INTAKE TRANSCRIPT\n"+transcriptText(c);
 }
 function emptyQueueReview(){
-  return {status:"idle",runId:"",snapshot:null,proposal:null,error:"",sessionId:"",history:[],appliedAt:""};
+  return {status:"idle",runId:"",snapshot:null,proposal:null,error:"",sessionId:"",history:[],draft:"",appliedAt:""};
 }
 function queueSnapshot(){
   const patients=CASES.filter(c=>!getState(c).complete).map(c=>{
@@ -2924,10 +2925,15 @@ const roomDialogueReady=fetch('/assets/waiting-room-dialogue.json',{cache:'no-ca
       lines:Array.isArray(data.lines)?data.lines.filter(line=>typeof line==='string'&&line.trim()&&line.length<=120):[]};
     syncWaitingRoomBanter();
   }).catch(()=>{});
-function waitingRoomVisible(){
+function waitingRoomVisible({allowSidebar=false}={}){
   const room=workspace.querySelector('.triage-game');
-  if(!room||agentPanel.open||document.hidden||window.frameElement&&!window.frameElement.getClientRects().length)return false;
+  if(!room||document.hidden||window.frameElement&&!window.frameElement.getClientRects().length)return false;
   const box=room.getBoundingClientRect();
+  if(agentPanel.open){
+    if(!allowSidebar||agentPanel.classList.contains('fullscreen'))return false;
+    const panel=agentPanel.getBoundingClientRect();
+    if(panel.left<=box.left&&panel.right>=Math.min(box.right,innerWidth))return false;
+  }
   return box.width>0&&box.bottom>0&&box.top<innerHeight;
 }
 function hideWaitingRoomQuip(){
@@ -3257,7 +3263,7 @@ function animateWaitingRoom(before){
   updateWaitingRoomAgentChat();
 }
 function renderQueueReview(options={}){
-  const before=options?.animateRoom&&waitingRoomVisible()?new Map([...workspace.querySelectorAll('.game-patient')].map(actor=>
+  const before=options?.animateRoom&&waitingRoomVisible({allowSidebar:true})?new Map([...workspace.querySelectorAll('.game-patient')].map(actor=>
     [actor.dataset.gameCase,Number(actor.dataset.slot)])):null;
   stopWaitingRoomMotion();hideRoomEvidence();
   workspace.innerHTML=waitingRoomHtml();
@@ -3281,9 +3287,22 @@ async function showQueueReview({showActivity=true}={}){
   if(chat.busy)return chat;
   const key="queue-review:"+runId;
   if(chat.key!==key)chat.load({
-    key,sessionId:queueReview.sessionId,messages:queueReview.history,readOnly:true,title:"Queue review activity",
+    key,sessionId:queueReview.sessionId,messages:queueReview.history,draft:queueReview.draft,
+    title:"Chat with CliniClaw",placeholder:"Ask CliniClaw about the waiting room…",
+    prepareMessage(text,request){
+      if(request?.kind==="queue-review")return text;
+      return demoContext()+"Continue the waiting-room conversation. Answer the user's question directly in plain language. "+
+        "This is an ordinary chat turn, not a structured queue review. Do not return a queue-review JSON object. "+
+        "Chat does not change patient placement or saved handoffs. If asked to update the queue, explain that Triage Queue starts that review. "+
+        "Keep each patient's intake reports separate from dated FHIR facts; use read-only chart lookups when needed. "+
+        "Do not diagnose, recommend treatment, write records, or claim care has occurred. "+
+        "The following open-patient context includes the current applied priorities and full intake transcripts.\n\n"+
+        JSON.stringify(queueSnapshot().patients)+"\n\nUser question: "+text;
+    },
     transformAnswer(answer,request){
       if(epoch!==chatEpoch||queueReview.runId!==runId)throw new Error("This queue review was superseded.");
+      // Only an explicit triage run can validate and apply a proposed order.
+      if(request?.kind!=="queue-review")return answer;
       if(queueReviewStale())throw new Error("The queue changed during review. Run Triage Queue again; existing placements are unchanged.");
       let proposal;
       try{proposal=parseQueueReview(answer,queueReview.snapshot,runId);}
@@ -3295,7 +3314,7 @@ async function showQueueReview({showActivity=true}={}){
     },
     onChange(snapshot){
       if(epoch!==chatEpoch||queueReview.runId!==runId)return;
-      queueReview={...queueReview,sessionId:snapshot.sessionId||"",history:snapshot.messages};
+      queueReview={...queueReview,sessionId:snapshot.sessionId||"",history:snapshot.messages,draft:snapshot.draft||""};
       persist();
     },
     onActivity(activity){
@@ -3315,7 +3334,10 @@ async function runQueueReview(){
   roomAgentActivity={runId,text:""};
   queueReview={...emptyQueueReview(),status:"running",runId,snapshot};
   persist();
-  const chat=await showQueueReview({showActivity:false});
+  // Keep an open conversation beside the room while its review runs.
+  const showActivity=agentPanel.open;
+  if(showActivity)expandAgentPanel(false);
+  const chat=await showQueueReview({showActivity});
   revealWaitingRoom();
   if(epoch!==chatEpoch||queueReview.runId!==runId)return;
   if(!chat||chat.busy){
@@ -3430,14 +3452,15 @@ function demoContext(c){
 }
 function refreshAgentActions(){
   const s=activeAgentCase?getState(activeAgentCase):null;
-  document.querySelector(".agent-input-hint").textContent=s?"Patient conversation · clinician review required":"Whole-queue review · automatic queue updates";
-  agentFrame.title=s?"Patient conversation with CliniClaw":"Queue review activity with CliniClaw";
+  document.querySelector(".agent-input-hint").textContent=s?"Patient conversation · clinician review required":
+    queueReview.status==="running"?"Whole-queue review · automatic queue updates":"Waiting room conversation";
+  agentFrame.title=s?"Patient conversation with CliniClaw":"Waiting room conversation with CliniClaw";
   agentRegenerate.hidden=!s;
   agentRegenerate.disabled=agentBusy||!s;
   agentRegenerate.classList.toggle("primary",Boolean(s?.confirmed&&!s.aiSummary));
   agentQueuePropose.disabled=agentBusy||queueReview.status==="running"||!queueSnapshot().patients.length;
   agentQueuePropose.textContent=queueReview.runId?"Reassess whole queue":"Review whole queue";
-  document.getElementById("agentQueueStop").hidden=!(agentBusy&&!activeAgentCase);
+  document.getElementById("agentQueueStop").hidden=!(agentBusy&&!activeAgentCase&&queueReview.status==="running");
   refreshQueueControls();
   syncPatientTabs();
 }
@@ -3456,6 +3479,7 @@ function syncPatientTabs(){
   const chatVisible=!patient||(expanded?expandedPatientChat:patientTab==='chat');
   workspace.querySelectorAll('.game-patient').forEach(actor=>actor.setAttribute('aria-expanded',String(agentPanel.open&&actor.dataset.gameCase===activeAgentCase?.id)));
   agentPanel.classList.toggle('patient-mode',patient);
+  document.body.classList.toggle('queue-chat-open',document.body.classList.contains('agent-open')&&!patient&&!agentPanel.classList.contains('fullscreen'));
   document.getElementById('patientTabs').hidden=!patient||expanded;
   document.getElementById('expandedPatientTools').hidden=!expanded;
   document.getElementById('patientDetails').hidden=!patient||(!expanded&&patientTab==='chat');
@@ -3477,8 +3501,8 @@ function syncPatientTabs(){
   }
   if(patient&&!expanded){agentFrame.setAttribute('role','tabpanel');agentFrame.setAttribute('aria-labelledby','patientChatTab');}
   else{agentFrame.removeAttribute('role');agentFrame.removeAttribute('aria-labelledby');}
-  document.getElementById('agentTitle').textContent=patient?activeAgentCase.name:'Queue review activity';
-  document.getElementById('agentSub').textContent=patient?activeAgentCase.id+' · Patient/'+activeAgentCase.patientId:'All open patients · intake review';
+  document.getElementById('agentTitle').textContent=patient?activeAgentCase.name:queueReview.status==='running'?'Queue review activity':'Chat with CliniClaw';
+  document.getElementById('agentSub').textContent=patient?activeAgentCase.id+' · Patient/'+activeAgentCase.patientId:'Waiting room · all open patients';
   document.getElementById('openPatientChat').hidden=!activeAgentCase;
   if(activeAgentCase)document.querySelector('#openPatientChat .btn-label').textContent='Open '+activeAgentCase.name.split(' ')[0]+'’s chat';
   const resume=document.getElementById('resumePanel');resume.hidden=!minimizedPanel;
@@ -3525,7 +3549,7 @@ function openPatient(caseId){
   hideRoomEvidence();return showCaseChat(c,{tab:'intake',focus:false});
 }
 function openAgentPanel(c){
-  stopWaitingRoomMotion();
+  if(c)stopWaitingRoomMotion();
   const opening=!agentPanel.open;
   if(opening)chatOpener=document.activeElement;
   minimizedPanel=null;stopWaitingRoomBanter();hideRoomEvidence();
@@ -3536,6 +3560,7 @@ function openAgentPanel(c){
     agentPanel.showModal();
     restorePatientScroll();
   }
+  if(!waitingRoomVisible({allowSidebar:true}))stopWaitingRoomMotion();
   agentRegenerate.textContent=c&&getState(c).aiSummary?'Regenerate summary':'Generate summary';
   refreshAgentActions();
 }
@@ -3553,6 +3578,7 @@ function closeAgentPanel({minimize=false}={}){
   roomEvidence.suppressFocus=false;
 }
 function expandAgentPanel(fullscreen){
+  if(fullscreen)stopWaitingRoomMotion();
   savePatientScroll();
   if(fullscreen&&!agentPanel.classList.contains('fullscreen'))expandedPatientChat=patientTab==='chat';
   if(!fullscreen&&agentPanel.classList.contains('fullscreen')&&expandedPatientChat)patientTab='chat';
@@ -4672,6 +4698,15 @@ html.embed #sessionLabel{margin-left:auto;color:var(--muted);font-size:10px}
   .cursor::after { content: '▋'; color:var(--accent-text); margin-left: 1px; }
   .typing { display: inline-flex; gap: 4px; padding: 3px 0; }
   .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+  @media(prefers-reduced-motion:no-preference){
+    .typing i { animation: typing-bounce 1.2s ease-in-out infinite; }
+    .typing i:nth-child(2) { animation-delay: .16s; }
+    .typing i:nth-child(3) { animation-delay: .32s; }
+  }
+  @keyframes typing-bounce {
+    0%,60%,100% { transform: translateY(0); opacity: .4; }
+    30% { transform: translateY(-3px); opacity: 1; }
+  }
 
   /* markdown */
   .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
@@ -4780,7 +4815,6 @@ html.embed #sessionLabel{margin-left:auto;color:var(--muted);font-size:10px}
       <div class="suggest" id="suggest">
         <button>What can you do?</button>
         <button>How many patients are in the system?</button>
-        <button>Tell me about patient Paul, born on 21/12/2013?</button>
       </div>
     </div>
   </div>
@@ -5160,7 +5194,12 @@ async function sendTurn(request) {
   const bubble = turn.bubble;
   const TYPING = '<span class="typing" role="status" aria-label="CliniClaw is replying"><i></i><i></i><i></i></span>';
   const WAITING = TYPING + (request?.waitingLabel ? '<p>'+esc(request.waitingLabel)+'</p>' : '');
-  bubble.innerHTML = WAITING;
+  const showWaiting = () => {
+    // Preserve the dots across streamed chunks so their animation can continue.
+    if(!bubble.querySelector('.typing'))bubble.innerHTML = WAITING;
+    bubble.classList.remove('cursor');
+  };
+  showWaiting();
   host.onActivity?.({text:request?.waitingLabel||'CliniClaw is replying…',kind:'status'});
   setStreaming(true);
   controller = new AbortController();
@@ -5174,7 +5213,7 @@ async function sendTurn(request) {
   let pumpId = 0;
 
   const paint = () => {
-    if (request?.structured || !seg) { bubble.innerHTML = WAITING; bubble.classList.remove('cursor'); }
+    if (request?.structured || !seg) showWaiting();
     else { bubble.innerHTML = mdLite(seg); bubble.classList.add('cursor'); }
     scrollDown();
   };
@@ -5213,8 +5252,7 @@ async function sendTurn(request) {
     flushPending();
     if (seg.trim() && !request?.structured) turn.note(seg.trim());
     seg = '';
-    bubble.classList.remove('cursor');
-    bubble.innerHTML = WAITING;
+    showWaiting();
   };
 
   const settle = () => {
@@ -5395,6 +5433,7 @@ window.CliniClawChat = {
     if(isBusy())throw new Error('Cannot change patient during an active request');
     if(conversationKey)drafts.set(conversationKey,{text:input.value,attachments});
     host = config;
+    input.placeholder=config.placeholder||(config.patientName?'Ask about this patient…':'Ask CliniClaw…');
     document.body.classList.toggle("read-only",Boolean(config.readOnly));
     conversationKey = config.key;
     const draft = drafts.get(conversationKey);

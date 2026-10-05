@@ -209,8 +209,8 @@ width and height without scrolling or cropping. The patient list scrolls indepen
 Patients wait on connected, perforated metal benches while CliniClaw, a pixel-art
 medical lobster in a white coat, sits at the intake desk. The room and chat
 share the same local SVG character.
-When CliniClaw finishes a valid review, seated patients appear in the updated order
-instantly. The patient list updates automatically at the same time,
+When CliniClaw finishes a valid review, the patient list updates immediately and
+patients walk to their new seats over about four seconds,
 with #1 closest to the **Doctor** door. Colored badges show priority: red for
 Immediate attention, amber for Review first, blue for Review soon, green for
 Routine. Pending badges stay hidden until review; an inconclusive review shows
@@ -224,8 +224,10 @@ confirmation panel; valid reviews update the whole queue automatically.
 Stale, failed, and interrupted reviews display the existing applied order.
 Invalid or empty responses trigger one automatic full-batch retry. The same intake
 snapshot and validation rules apply; no partial or repaired response changes placement.
-The dashboard uses static visuals, without idle gestures, queue movement animations,
-or animated visual effects.
+Documents fly past CliniClaw during review, and patients walk after a validated
+change of order. Queue chat can stay open beside the room on desktop; opening or
+closing that sidebar does not cancel the walk. Reduced-motion preferences disable
+these effects. Idle claws, fish, bubbles, and the desk monitor animate locally.
 
 CliniClaw's speech bubble mirrors the current chat activity; click it to open the
 full queue conversation. Patient small talk comes from
@@ -243,9 +245,15 @@ failed runs, and stopped reviews leave all applied placements intact. Changes to
 open cases, intakes, the review method, or applied placements invalidate an
 unapplied draft and require a new review.
 
+Click CliniClaw’s speech bubble to ask questions before or after triage. The
+conversation has the open patients’ intake context and current applied priorities;
+ordinary replies never apply a queue proposal. Waiting-room drafts and history
+are saved separately from patient conversations.
+
 **Triage Queue** or **Reassess queue** starts a fresh, dedicated queue session. Patient handoffs and
-follow-ups retain their own sessions, histories, and drafts. The queue activity
-panel is read-only. Patient chats do not feed into this intake-only review.
+follow-ups retain their own sessions, histories, and drafts. An open queue chat
+sidebar stays open during review and accepts follow-up questions when it finishes.
+Prior chat messages do not feed into the new intake-only review.
 Reassess after intake changes; an unapplied draft from the previous chart-based
 workflow must also be reassessed. Results needing more information preserve any existing
 placement, including an immediate-attention placement. Previously
@@ -283,8 +291,8 @@ A complete, valid queue review updates all supported placements together and
 records an automatic update in the queue session, without claiming clinician confirmation.
 Within an applied priority, longest-waiting cases appear first. Partial responses,
 failed runs, and ordinary follow-up questions do not reorder patients.
-Applied placements update instantly in both the waiting room and sidebar,
-including transfers into or out of the immediate-attention section.
+Applied placements are saved immediately, including transfers into or out of the
+immediate-attention section; the room animates each changed seat afterward.
 A screen-reader status announces the placement changes.
 
 After the queue updates, use **Generate handoff** when ready for a detailed
