@@ -5044,7 +5044,7 @@ html.embed #sessionLabel{margin-left:auto;color:var(--muted);font-size:10px}
       <textarea id="input" rows="1" aria-label="Message CliniClaw" placeholder="Ask about this patient…"></textarea>
       <button class="send" id="send" title="Send" disabled>➤</button>
     </div>
-    <div class="hint">Enter to send · Shift+Enter for newline · responses may take a moment while the agent runs tools</div>
+    <div class="hint">Enter to send · Shift+Enter for newline</div>
   </div>
 </main>
 <script>
