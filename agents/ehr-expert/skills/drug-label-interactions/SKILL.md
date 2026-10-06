@@ -1,116 +1,69 @@
 ---
 name: drug-label-interactions
-description: Fetch one drug's openFDA label and summarize interaction-related text (drug_interactions, boxed warnings, contraindications, warnings). Use when the user asks about FDA/openFDA labeling, interactions, contraindications, boxed warnings, or whether a named drug is mentioned against a patient's current meds. A free-text drug name is enough — resolve it to an RxCUI with rxnorm-resolve-rxcui first if one is not already known. This is a single-label lookup, not a pairwise interaction checker, and it does not decide whether a combination is safe.
+description: Retrieve FDA drug-label evidence for medication interaction, contraindication, or warning questions using the packaged lookup_labels.py command. Accepts drug names or known RxCUIs and returns verified label identities, excerpts, and direct source links. Use for named-drug or medication-pair questions, including medication-safety questions that need factual label information. Does not determine whether a patient should take a medicine; not needed for a chart-only conditions or medication-list question.
 ---
 
 # Drug Label Interactions
 
-Use this skill to fetch the FDA label for one drug by RxCUI and extract the interaction-related information from that drug's label.
+Use the packaged command below for label retrieval. It owns name resolution,
+RxCUI lookup, verified ingredient fallback, JSON parsing, and bounded retries.
+There is no need to load `rxnorm-resolve-rxcui` separately for this workflow.
 
-This skill does not compare two drugs directly. The openFDA Drug Label API returns labeling records for one drug/product; interaction information appears inside fields such as `drug_interactions`, `warnings`, `boxed_warning`, and `contraindications`.
+## Run the lookup
 
-## Safety Boundary
-
-- Do not give medical advice or tell the user whether a patient should take, stop, or combine medications.
-- Do not say a drug has "no interactions" just because the label section is empty or unavailable.
-- Say "no interaction label text found" or "no matching label section found" when appropriate.
-- Encourage confirmation with a pharmacist, physician, or qualified clinician for patient-specific decisions.
-
-The `name` is optional display context. Do not resolve free-text names in this skill. If `rxcui` is missing, return `Insufficient data`.
-
-## Core Workflow
-
-1. Confirm a single RxCUI is present.
-2. Query openFDA Drug Label by `openfda.rxcui`.
-3. Extract interaction-related label sections.
-4. Summarize the interaction information from the returned label text.
-5. Report label identifiers and limitations.
-
-## Fetch Label By RxCUI
-
+Pass the medicines relevant to the clinician's question, at most three per call:
 
 ```bash
-curl -G "https://api.fda.gov/drug/label.json" \
-  --data-urlencode 'search=openfda.rxcui:"<RxCUI HERE>"' \
-  --data-urlencode "limit=5" \
-  -H "Accept: application/json"
+python3 /sandbox/.hermes/skills/drug-label-interactions/scripts/lookup_labels.py --drug ibuprofen --drug naproxen --drug clopidogrel --term bleeding --term NSAID --term antiplatelet
 ```
 
-## Fields To Extract
+Use known chart RxCUIs when available instead of resolving those names again:
 
-Prefer these sections, in order:
-
-- `drug_interactions`
-- `boxed_warning`
-- `contraindications`
-- `warnings`
-- `precautions`
-- `warnings_and_cautions`
-
-Also capture these metadata fields when available:
-
-- `id`
-- `set_id`
-- `openfda.brand_name`
-- `openfda.generic_name`
-- `openfda.manufacturer_name`
-- `openfda.rxcui`
-- `effective_time`
-
-## Interpretation Rules
-
-Use one of these statuses:
-
-- `Interaction label text found`: The returned label includes `drug_interactions` or other interaction-related text.
-- `Specific mention found`: The returned label mentions the user's requested drug, class, or interaction term.
-- `No specific mention found`: The label was retrieved, but the requested term was not found in the relevant sections.
-- `No interaction label text found`: The label was retrieved, but no interaction-related fields were present.
-- `Insufficient data`: The RxCUI was missing, openFDA returned errors, or no label records were found.
-
-Never convert `No specific mention found` or `No interaction label text found` into "safe to combine".
-
-## Output Format
-
-Use this structure:
-
-```text
-Drug label interaction lookup: warfarin
-
-Input:
-- RxCUI: 11289
-
-Status: Interaction label text found
-
-Label:
-- Brand/generic: [from openfda fields]
-- Effective time: [effective_time]
-
-Interaction-related sections:
-- drug_interactions: [brief summary]
-- contraindications: [brief summary if relevant]
-- warnings: [brief summary if relevant]
-
-Limitations:
-- This summarizes openFDA label text for one drug.
-- It is not a complete drug interaction checker.
-- Missing label text does not prove the drug has no interactions.
+```bash
+python3 /sandbox/.hermes/skills/drug-label-interactions/scripts/lookup_labels.py --rxcui 849574 --rxcui 309362 --term bleeding --term NSAID
 ```
 
-If the user asked about a specific term:
+`--term` is optional literal excerpt filtering, not a clinical classification.
+Choose terms from the question or retrieved evidence. For a simple question
+about one medicine, pass only that medicine. Patient context already supplied
+in the conversation does not need to be fetched again to run this label lookup.
 
-```text
-Specific term checked: aspirin
-Result: Specific mention found
-Where found: drug_interactions
-Summary: [brief summary of the relevant label text]
-```
+Execute [scripts/lookup_labels.py](scripts/lookup_labels.py) directly. Do not
+replace it with hand-written curl commands, inline Python, `execute_code`, or
+temporary parsers. Do not patch the script during a clinical lookup. If it is
+missing or fails, report that failure. If a tool requires approval, stop and
+surface the requirement; do not switch execution methods to avoid it.
 
-## API Error Handling
+The command returns JSON with one result per medicine. It exits `2` for an
+unresolved/failed lookup; read any successful results separately. Do not restart
+the same failed lookup: the command already retries transient errors once and
+stops at its request/time budget. Clarify ambiguous drug names with the clinician.
 
-- Treat openFDA `404` with "No matches found" as no label records found for that RxCUI.
-- Retry transient openFDA errors once with `limit=1`.
-- If multiple label records are returned, summarize the most relevant record first and mention that multiple records were found.
+## Read the evidence
 
+- `resolved_name`, `rxcui`, and `concept_type` identify the RxNorm concept.
+- `match_basis` distinguishes a direct RxCUI match from an ingredient fallback.
+  A fallback does **not** establish the patient's exact dose, formulation,
+  manufacturer, or product. Never silently present it as an exact product match.
+- `label.sections` contains source excerpts, literal term-match counts, and
+  explicit truncation flags. Arrays and strings are already handled. Do not
+  interpret missing terms or omitted text as no risk, no interaction, or safety.
+- `Insufficient data` means the lookup did not verify label evidence. Explain
+  the returned reason without adding interaction claims from model knowledge.
+- The command examines at most five label candidates and returns one label per
+  medicine. It is not an exhaustive or validated pairwise interaction checker.
 
-## Presenting the results
-Prioritize critical interactions first, if multiple interactions, summarize them in a table. Keep your responses short and to the point. Always end with a disclaimer: AI generated content, always consult with a physician or pharmacist. ALWAYS put a reference link at the end.
+## Answer the question
+
+Keep the answer brief: a small table with medicine/label, relevant warning,
+and a **direct `label_url` or `source_url` citation** for each claim. Use the
+returned label dates and identities; a generic FDA homepage is not a citation.
+Mention a material ingredient/product mismatch or truncated evidence.
+
+Separate label statements from patient-reported use and charted prescriptions.
+An active MedicationRequest does not confirm the patient is taking the drug.
+Do not approve a combination, choose treatment, infer a diagnosis, or convert
+label statements into a patient-specific safety verdict. For "is it safe?",
+state that suitability needs clinician review and report only the retrieved
+label information relevant to that question. End with a short clinician-review
+reminder. Never fill retrieval gaps with model knowledge.

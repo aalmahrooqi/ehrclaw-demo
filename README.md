@@ -142,7 +142,7 @@ The six in-person intakes cover different reasons for a visit:
 | Dara | New fatigue and recurrent lightheadedness | Different symptom timelines; heavier last period; missed blood-test visit |
 | Florence | New ankle injury | Worsening pain/swelling; standing versus resting pain; corrected walking history |
 | Jacques | Back-pain flare | New episode versus chronic history; work and sleep impact; stated symptom negatives |
-| Norbert | Historical laboratory results | Date correction; uncertain subsequent testing and follow-up |
+| Carmen | Knee pain and a question about ibuprofen | Proposed medicine versus actual use; old active prescriptions to reconcile |
 | Dorsey | Ongoing chest pressure with associated symptoms | Current symptoms and onset versus historical chart diagnoses |
 
 The first four conversations are 31–33 turns (roughly 600–675 words). They keep
@@ -229,6 +229,14 @@ change of order. Queue chat can stay open beside the room on desktop; opening or
 closing that sidebar does not cancel the walk. Reduced-motion preferences disable
 these effects. Idle claws, fish, bubbles, and the desk monitor animate locally.
 
+**Close case** dismisses the patient view and shows the patient walking from the
+Doctor door down the side aisle and out of the room over about five seconds.
+The six chairs stay in place, and that patient's seat stays empty through page
+reloads and further queue reviews. Saved summaries and conversations remain in
+the completed case. Reduced motion skips the exit walk; **Reset Demo** restores
+all patients and seats. Existing review and immediate-attention completion rules
+still apply. Verify with `node scripts/test_dashboard_departure.mjs`.
+
 CliniClaw's speech bubble mirrors the current chat activity; click it to open the
 full queue conversation. Patient small talk comes from
 `assets/waiting-room-dialogue.json`: edit `lines`, `intervalMs`, `visibleMs`, or
@@ -281,11 +289,30 @@ Applied immediate-attention placements remain visible in the patient list.
 The patient-detail and chat views do not repeat the alert banner or require
 acknowledgment. Filtering other reviews does not hide the applied placement.
 
-**Norbert Dwain Muller (Patient/114506)** remains the contrasting historical-result
-verification case with a long intake. His February 11, 2026 labs do not trigger a
-new urgency rule; without another supported workflow rule, the agent should
-return **More information needed**. All scripts distinguish invented intake
-reports from separately retrieved chart evidence.
+**Carmen Evan Wiegand (Patient/40575)** replaces Norbert in the waiting room.
+His fictional intake describes a week of knee pain and a question about trying
+ibuprofen/Advil, which he has not started. The chart supplies a separate story:
+knee osteoarthritis, heart and kidney history, and active prescription records
+for naproxen and clopidogrel. An active order does not establish actual use;
+the naproxen order's 1994 authored date makes this distinction easy to explain.
+No priority is preset, and historical conditions or medicines do not rank him.
+
+After **Triage Queue**, select Carmen and use **Generate summary**. Short follow-ups:
+
+| Prompt | Demo focus |
+| --- | --- |
+| List his active prescriptions and dates. | Retrieve chart facts; distinguish orders from actual use. |
+| Look up ibuprofen warnings about other painkillers and kidney disease. | Retrieve label warnings for clinician review. |
+| What does clopidogrel's label say about NSAIDs? | Explain a label-based interaction concern in everyday language. |
+| Which active prescriptions are over ten years old? | Find old orders that need medication reconciliation. |
+
+These are information-retrieval prompts, not requests for the agent to approve
+ibuprofen or choose treatment. An after-visit summary can follow once the
+presenter supplies a clinician plan; the intake does not invent a completed visit.
+Carmen has a fresh local state key, so Norbert's saved chat, handoff, after-visit
+summary, completion status, and vacated seat cannot carry over. The prior queue
+review is archived and can be rerun for the new lineup. Other patients retain
+their saved state; underlying FHIR records are unchanged.
 
 A complete, valid queue review updates all supported placements together and
 records an automatic update in the queue session, without claiming clinician confirmation.
@@ -325,7 +352,7 @@ The local backend requires `nemoguardrails==0.22.0`, which depends on `annoy` �
 
 ## Skills
 
-Agent skills live under `agents/ehr-expert/skills/`. Each skill documents how the agent queries an external data source.
+Agent skills live under `agents/ehr-expert/skills/`. Each skill documents a clinical data or summarization workflow.
 
 ### Intake Transcript Summarization
 
@@ -333,6 +360,29 @@ Turns a synthetic nurse/patient intake transcript into a 120–160 word,
 source-labeled handoff with four sections: Intake summary, Reported at intake,
 Chart matched, and Needs review. The review queue renders these as compact
 cards and keeps handoff generation separate from automatic whole-queue ordering.
+
+### After-Visit Summary
+
+Open a patient and choose **After-visit summary** (or the **After visit** tab).
+Enter the clinician's documented visit notes and plan, then select **Generate
+after-visit summary**. The `generate-after-visit-summary` skill turns those notes
+into a patient-friendly draft covering the visit, care, medicines, next steps,
+when to get help, and anything still to confirm. Missing details stay explicit;
+intake symptoms and historical prescriptions do not become discharge advice.
+
+Review the preview, optionally **Edit draft wording**, then **Copy draft** or
+**Print / save PDF**. Notes and drafts persist per patient in this browser.
+Changing the source notes requires regeneration before export. Generation does
+not close the case, update FHIR, or send anything to the patient. For Dorsey's
+intake-only scenario, supply explicit fictional clinician notes before using
+this step; there is no completed assessment or discharge plan in the intake.
+
+New sandbox builds include the skill automatically. To install it in an existing
+sandbox:
+
+```bash
+openshell sandbox upload hermes-health ./agents/ehr-expert/skills/generate-after-visit-summary /sandbox/.hermes/skills/
+```
 
 ### FHIR Data Access
 
@@ -355,7 +405,27 @@ Resolved concept:
 
 ### Drug Interaction Label Check
 
-Fetches FDA drug labeling for a known RxCUI from [openFDA](https://open.fda.gov/) and summarizes interaction-related label text (e.g. drug interactions, boxed warnings, contraindications). This is a single-drug label lookup, not a pairwise interaction checker.
+Fetches [openFDA](https://open.fda.gov/) labeling with the packaged
+`drug-label-interactions/scripts/lookup_labels.py` command. It accepts up to
+three drug names or known RxCUIs, verifies concepts with RxNav, and returns one
+label per medicine with focused excerpts, dates, and direct label URLs.
+
+```bash
+python3 /sandbox/.hermes/skills/drug-label-interactions/scripts/lookup_labels.py --drug ibuprofen --drug naproxen --drug clopidogrel --term bleeding --term NSAID
+```
+
+The helper performs read-only requests through curl and parses responses in
+Python. It tries an exact RxCUI query, then a verified single-ingredient fallback
+only when the source reports no matches. Ingredient matches are explicitly
+separate from the patient's exact product; ambiguous names and mismatched
+combination labels are rejected. Requests have a 60-second batch budget and at
+most one retry per transient failure. Permission errors stop the lookup.
+
+The agent runs this packaged command instead of inventing curl/Python pipelines
+or temporary parsers. Missing evidence is reported as unverified, and source
+excerpts may be incomplete. This is individual label retrieval, not a complete
+pairwise interaction checker or a patient-specific treatment decision.
+Run offline regressions with `python3 scripts/test_drug_label_lookup.py`.
 
 ### Clinical Trial Cohort Prescreener
 
