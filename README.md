@@ -140,7 +140,7 @@ The six in-person intakes cover different reasons for a visit:
 | --- | --- | --- |
 | Paul | Sneezing and itchy eyes affecting school | Child and parent accounts; corrected timing; sleep and activity impact |
 | Dara | New fatigue and recurrent lightheadedness | Different symptom timelines; heavier last period; missed blood-test visit |
-| Florence | New ankle injury | Worsening pain/swelling; standing versus resting pain; corrected walking history |
+| Florence | New ankle injury and OTC painkiller question | Worsening pain/swelling; reports Aleve this morning and asks about adding ibuprofen; dose and timing need verification |
 | Jacques | Back-pain flare | New episode versus chronic history; work and sleep impact; stated symptom negatives |
 | Carmen | Knee pain and a question about ibuprofen | Proposed medicine versus actual use; old active prescriptions to reconcile |
 | Dorsey | Ongoing chest pressure with associated symptoms | Current symptoms and onset versus historical chart diagnoses |
@@ -307,8 +307,9 @@ After **Triage Queue**, select Carmen and use **Generate summary**. Short follow
 | Which active prescriptions are over ten years old? | Find old orders that need medication reconciliation. |
 
 These are information-retrieval prompts, not requests for the agent to approve
-ibuprofen or choose treatment. An after-visit summary can follow once the
-presenter supplies a clinician plan; the intake does not invent a completed visit.
+ibuprofen or choose treatment. The after-visit summary extracts explicit
+clinician decisions from the chat and confirmed demo actions. Any missing plan
+remains marked for review; the intake does not invent a completed visit.
 Carmen has a fresh local state key, so Norbert's saved chat, handoff, after-visit
 summary, completion status, and vacated seat cannot carry over. The prior queue
 review is archived and can be rerun for the new lineup. Other patients retain
@@ -361,27 +362,88 @@ source-labeled handoff with four sections: Intake summary, Reported at intake,
 Chart matched, and Needs review. The review queue renders these as compact
 cards and keeps handoff generation separate from automatic whole-queue ordering.
 
-### After-Visit Summary
+### Visit actions inside the patient chat
 
-Open a patient and choose **After-visit summary** (or the **After visit** tab).
-Enter the clinician's documented visit notes and plan, then select **Generate
-after-visit summary**. The `generate-after-visit-summary` skill turns those notes
-into a patient-friendly draft covering the visit, care, medicines, next steps,
-when to get help, and anything still to confirm. Missing details stay explicit;
-intake symptoms and historical prescriptions do not become discharge advice.
+Actions now appear directly below CliniClaw's replies. There is no separate
+**Visit actions** tab. Ask in the chat or use its **Follow-up**, **Prescription**,
+**X-ray**, and **Labs** shortcuts; review, edit, confirm, or cancel the resulting
+cards without leaving the conversation.
 
-Review the preview, optionally **Edit draft wording**, then **Copy draft** or
-**Print / save PDF**. Notes and drafts persist per patient in this browser.
-Changing the source notes requires regeneration before export. Generation does
-not close the case, update FHIR, or send anything to the patient. For Dorsey's
-intake-only scenario, supply explicit fictional clinician notes before using
-this step; there is no completed assessment or discharge plan in the intake.
+The visit moves from **summary → chart/medication questions → clinician plan →
+actions → after-visit summary**. Summary generation stays focused on the handoff.
+During Q&A, a focused blood-result or monitoring question that reveals a relevant
+testing gap can prompt “Would you like me to prepare a blood-test request for
+review?” The answer keeps its dated FHIR evidence, and the offer cites the
+clinician's question. It does not mean a test is overdue or an order is placed.
+Routine evidence review without a relevant gap needs no offer. A clinician plan,
+follow-up discussion, or wrap-up can also prompt up to two relevant next steps,
+with a **Why this option?** explanation grounded in the clinician's messages.
+Replying to a draft offer prepares it; it does not confirm a clinical order. Dismissed or
+already-offered options are not repeated. The agent does not choose a medicine,
+dose, test, or treatment on the clinician's behalf.
 
-New sandbox builds include the skill automatically. To install it in an existing
-sandbox:
+- When follow-up comes up, CliniClaw immediately offers the next three available
+  fictional weekday times in clinic local time. Reply **“Book the second one”**
+  or **“Option 2”** to record the demo booking; there is no need to click a button.
+  Card controls still work for explicitly requested drafts. Occupied slots are
+  excluded, conflicts refresh the choices, and cancellation releases the time.
+- Prescription drafts require medication, dose, route, frequency, and duration.
+  Fill missing details directly on the card, then **Submit prescription**.
+  The confirmed card shows **Prescription · Submitted**, and the after-visit
+  summary also calls it a prescription. Submission records the local action;
+  it does not check safety, send or dispense medication.
+- X-ray requests require the body site/side and reason. A confirmed request is
+  not an examination or an imaging result.
+- Blood-test requests require the clinician's test list and reason. Confirming
+  a lab request does not record specimen collection or produce results. Asking
+  for existing blood results is a separate read-only FHIR lookup with sources.
+
+Confirming any action briefly highlights its card and draws a checkmark. The
+confirmation badge remains visible afterward; reopening saved cards does not
+replay the effect. Reduced-motion preferences keep the static confirmation.
+
+All action records are simulated, saved per patient in this browser, and survive
+reloads and new conversations. Existing records from the former tab are restored
+as chat cards. **Reset Demo** clears actions and suggestions. No booking service,
+pharmacy, laboratory, imaging service, or FHIR write endpoint is contacted.
+
+Short prompts for a fictional workflow demo:
+
+| Prompt | What appears in chat |
+| --- | --- |
+| We should arrange the next appointment. | Three available times offered immediately. |
+| Book the second one. | Confirmed appointment and reference, in chat. |
+| Draft an X-ray request for the right knee, reason: right-knee pain. | An editable request for review. |
+| Prepare a blood-test request. | A draft with fields for the clinician's tests and reason. |
+| Generate an after-visit summary. | The handout, built from chat and confirmed actions. |
+
+These are demo workflow examples, not patient-specific treatment recommendations.
+
+The `demo-visit-actions` skill supplies validated action and suggestion metadata.
+The `generate-after-visit-summary` skill rephrases documented clinician plans
+into clear patient instructions. It returns an exact source quote for evidence
+checks alongside the patient wording; only the paraphrase appears in the handout.
+The app inserts exact confirmed action details, including lab requests. The popup,
+copy, and print views use patient-copy wording without draft-review boilerplate. Questions, suggestions, and missing information
+do not become completed care or invented results. Extra clinician notes remain
+optional. Generate the handout in chat, then select **Open summary** in the reply
+to view a centered popup over a blurred background. Edit wording, copy, or print
+there; changing the source plan requires regeneration before export. Close the
+popup with Escape, its close button, or the backdrop to return to chat. Nothing
+is delivered to a patient automatically.
+
+New sandbox builds include both skills. For an existing sandbox:
 
 ```bash
-openshell sandbox upload hermes-health ./agents/ehr-expert/skills/generate-after-visit-summary /sandbox/.hermes/skills/
+openshell sandbox upload hermes-health ./agents/ehr-expert/skills/demo-visit-actions/SKILL.md /sandbox/.hermes/skills/demo-visit-actions
+openshell sandbox upload hermes-health ./agents/ehr-expert/skills/generate-after-visit-summary/SKILL.md /sandbox/.hermes/skills/generate-after-visit-summary
+```
+
+Validation (mocked browser checks; no external writes):
+
+```bash
+node scripts/test_dashboard_visit_actions.mjs
+node scripts/test_dashboard_avs.mjs
 ```
 
 ### FHIR Data Access
