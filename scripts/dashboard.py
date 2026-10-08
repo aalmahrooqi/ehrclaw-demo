@@ -1506,15 +1506,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 
 activate(location.hash.slice(1) || 'queue');
 </script>
@@ -4516,14 +4516,15 @@ for(const [index,button] of patientTabButtons.entries()){
   });
 }
 document.getElementById("reset").addEventListener("click", async () => {
-  if(!window.confirm("Reset Demo?\n\nThis clears saved demo summaries, queue reviews, chat history, visit actions, demo appointments, and drafts in this browser, and stops any active chat stream.\n\nFHIR records and agent memories are not changed. Continue?"))return;
+  if(!window.confirm("Reset Demo?\n\nThis clears all local storage for this site, including saved demo summaries, queue reviews, chat history, visit actions, demo appointments, drafts, and theme preferences. It restores the light theme and stops any active chat stream.\n\nFHIR records and agent memories are not changed. Continue?"))return;
   const resetEpoch=++chatEpoch,button=document.getElementById("reset");
   button.disabled=true;
   // Clear saved state before awaiting the iframe or stream shutdown. Late callbacks
   // belong to the old epoch and cannot restore the discarded patient sessions.
   saved={};queueReview=emptyQueueReview();workspaceMode="queue";minimizedPanel=null;patientScrollPositions.clear();
-  try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
-  persist();selected=CASES[0].id;filter="all";search.value="";
+  try{localStorage.clear();}catch(e){}
+  theme="light";applyTheme(theme);
+  selected=CASES[0].id;filter="all";search.value="";
   activeAgentCase=null;closeAgentPanel();expandAgentPanel(false);
   document.querySelectorAll(".filter").forEach(x=>x.classList.toggle("active",x.dataset.filter==="all"));
   setAgentLive(true,"resetting demo");render();
@@ -4542,10 +4543,10 @@ document.getElementById("reset").addEventListener("click", async () => {
 
 const themeBtn=document.getElementById("themeToggle");
 function applyTheme(t){document.body.classList.toggle("light",t==="light");themeBtn.textContent=t==="light"?"☀ light":"🌙 dark";}
-let theme="dark";try{theme=localStorage.getItem("atof-theme")||"dark"}catch(e){}applyTheme(theme);
+let theme="light";try{theme=localStorage.getItem("atof-theme")||"light"}catch(e){}applyTheme(theme);
 themeBtn.addEventListener("click",()=>{theme=document.body.classList.contains("light")?"dark":"light";
   try{localStorage.setItem("atof-theme",theme)}catch(e){}applyTheme(theme)});
-window.addEventListener("storage",e=>{if(e.key==="atof-theme")applyTheme(e.newValue||"dark")});
+window.addEventListener("storage",e=>{if(e.key==="atof-theme"||e.key===null)applyTheme(e.newValue||"light")});
 mountPixelPortraits();
 if(queueReview.status==="ready"){
   try{
@@ -5340,15 +5341,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 
 /* ------------------------------------------------------------- poll */
 async function pollOnce() {
@@ -6449,15 +6450,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.data?.type !== 'cliniclaw-prefill') return;
   const prompt = String(event.data.prompt || '').trim();
@@ -6586,15 +6587,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 </script>
 </body>
 </html>
@@ -6810,15 +6811,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 
 // ---- Agent memory ----
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -7530,15 +7531,15 @@ function applyTheme(t) {
   document.body.classList.toggle('light', t === 'light');
   themeBtn.textContent = t === 'light' ? '☀ light' : '🌙 dark';
 }
-let theme = 'dark';
-try { theme = localStorage.getItem('atof-theme') || 'dark'; } catch (e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('atof-theme') || 'light'; } catch (e) {}
 applyTheme(theme);
 themeBtn.addEventListener('click', () => {
   theme = document.body.classList.contains('light') ? 'dark' : 'light';
   try { localStorage.setItem('atof-theme', theme); } catch (e) {}
   applyTheme(theme);
 });
-window.addEventListener('storage', e => { if (e.key === 'atof-theme') applyTheme(e.newValue || 'dark'); });
+window.addEventListener('storage', e => { if (e.key === 'atof-theme' || e.key === null) applyTheme(e.newValue || 'light'); });
 </script>
 </body>
 </html>
