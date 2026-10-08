@@ -14,6 +14,7 @@ services:
       PATH: ${DASH_HOME:-$HOME}/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
       PYTHONUNBUFFERED: "1"
       # Dashboard
+      DASHBOARD_FHIR_URL: ${DASHBOARD_FHIR_URL:-http://127.0.0.1:8081/fhir}
       ATOF_SANDBOX: ${ATOF_SANDBOX:-hermes-health}
       ATOF_DIR: ${ATOF_DIR:-/sandbox/.nemo-relay/atof}
       HERMES_MEMORIES_DIR: ${HERMES_MEMORIES_DIR:-/sandbox/.hermes/memories}

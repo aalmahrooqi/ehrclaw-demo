@@ -126,6 +126,22 @@ clinician review and watching the agent work:
 - **hermes** — the native Hermes dashboard, embedded.
 - **audit** — live [ATOF](https://docs.nvidia.com/nemo/relay/) trace events, with a per-session browser, pretty JSON rendering, and raw `.jsonl` download.
 
+The dashboard resolves the six patients by their stable Synthea identifiers each
+time the queue page loads. Importing the same dataset on another machine can
+assign different FHIR resource IDs; no source edits are needed. All prompts,
+queue reviews, and patient actions use the resolved IDs. Missing or duplicate
+matches show a setup message with a **Try again** button rather than using an old
+ID or guessing by name. The lookups only read patient identities; they do not
+change any FHIR records.
+
+The default FHIR base URL is `http://127.0.0.1:8081/fhir`. For a different address,
+set `DASHBOARD_FHIR_URL` when starting Docker Compose, or pass `--fhir-url` to
+`scripts/dashboard.py`. Use the same server configured for the agent's FHIR tools.
+After reimporting data, refresh the dashboard. Saved conversations, queue reviews,
+and visit actions are scoped to that server and patient-ID mapping, so a changed
+mapping opens a fresh workspace. This update also starts a fresh workspace once
+for data saved by older dashboard versions.
+
 Patients have distinct, locally rendered pixel-art portraits shared across the
 queue, patient header, and intake transcript. Nurse and parent speakers have
 their own portraits plus small role labels. Chat uses a clinician portrait for
