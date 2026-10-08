@@ -2953,7 +2953,7 @@ function visitActionsGuidance(c){
     'Speak the suggestion naturally in reply and ask a useful next question; never make the clinician click a suggestion button to discover the options. For follow_up, the app immediately displays the three supplied dates as a numbered list with a chat booking instruction. Introduce that list and ask which time works; do not duplicate or invent a numbered list in reply. If a requested interval does not match the supplied slots, say so and ask whether an offered date works; never imply it satisfies that interval. For other suggestions, ask if the clinician wants that draft and ask for missing clinical details. A clear affirmative reply to your single previous offer counts as a request for its draft. '+
     'These are optional workflow choices, not new clinical recommendations: do not choose a drug, dose, test, imaging site, diagnosis, or treatment. Do not offer routine follow-up during an unresolved immediate-attention scenario. '+
     'Avoid generic menus after every reply. Do not repeat an active or dismissed offer, or an action type with an active draft/confirmed record. If a previous follow-up booking was cancelled and the clinician asks to arrange follow-up again, return a fresh follow_up suggestion with current dates; the old accepted offer does not block the new request. Direct clinician requests still work at any time. '+
-    'For dashboard patient Q&A, always load demo-visit-actions before your final response and return ONLY JSON with patientId, reply (your complete answer including any evidence citations), actions:[], and suggestions:[]. Empty arrays are correct when no action or next step fits. Use valid JSON with double-quoted keys and strings, no surrounding prose or code fences. reply must be nonempty clinician-facing Markdown: never embed JSON, schema examples, or action metadata inside it. '+
+    'For dashboard patient Q&A, return JSON with patientId and reply (your complete answer including any evidence citations). actions and suggestions are optional: omit either when it has no entries; omitted fields mean no actions or suggestions. Load demo-visit-actions when preparing action cards or relevant workflow offers; ordinary evidence answers do not need that skill. Use valid JSON with double-quoted keys and strings, no surrounding prose or code fences. reply must be nonempty clinician-facing Markdown: never embed JSON, schema examples, or action metadata inside it. '+
     'actions holds up to FOUR explicit clinician requests. Each is {type,instruction,details}; type is follow_up, prescription, xray, or lab. instruction must quote the clinician request exactly. '+
     'Details keys: follow_up {reason}; prescription {medication,dose,route,frequency,duration,quantity,pharmacy}; xray {bodySite,reason}; lab {tests,reason}. '+
     'Every nonempty detail must be copied verbatim from clinician messages or clinician-edited draft fields, never from intake, old chart orders, assistant suggestions, or model knowledge. Use empty strings for missing details; the clinician can fill them in on the card. An explicit request for a draft must still return its card when required details are missing; do not return only a clarification question. Lab tests is one string listing the clinician-specified blood tests. '+
@@ -2966,12 +2966,14 @@ function visitActionsGuidance(c){
 function parseVisitActions(answer,c,sources,suggestionSources=visitSuggestionSources(c)){
   const data=visitActionPayload(answer);
   const fail=()=>{throw new Error('CliniClaw did not return valid visit actions for this patient. No action was added. Please retry with the requested details.');};
-  if(!data||data.patientId!==c.patientId||typeof data.reply!=='string'||!data.reply.trim()||data.reply.length>20000||
-    !Array.isArray(data.actions)||data.actions.length>4)fail();
+  if(!data||data.patientId!==c.patientId||typeof data.reply!=='string'||!data.reply.trim()||data.reply.length>20000)fail();
+  // Missing metadata means no action. Supplied actions still require full validation.
+  const requestedActions=Object.hasOwn(data,'actions')?data.actions:[];
+  if(!Array.isArray(requestedActions)||requestedActions.length>4)fail();
   const reply=cleanVisitReply(data.reply);
   if(!reply)fail();
   const contains=text=>sources.toLowerCase().includes(text.toLowerCase());
-  const actions=data.actions.map(a=>{
+  const actions=requestedActions.map(a=>{
     if(!Object.hasOwn(VISIT_FIELDS,a?.type)||typeof a.instruction!=='string'||a.instruction.trim().length<1||
       a.instruction.length>2000||!contains(a.instruction.trim())||!a.details||typeof a.details!=='object'||Array.isArray(a.details))fail();
     const keys=VISIT_FIELDS[a.type].map(([key])=>key);
@@ -3249,11 +3251,11 @@ function singleStructuredObject(answer,field){
   const text=String(answer),objects=[];
   for(const {start,end,complete} of structuredObjectRanges(text)){
     if(!complete)return null;
-    try{const obj=JSON.parse(text.slice(start,end));if(Object.hasOwn(obj,field))objects.push(obj);}catch(e){}
+    try{const obj=JSON.parse(text.slice(start,end));if((Array.isArray(field)?field:[field]).some(key=>Object.hasOwn(obj,key)))objects.push(obj);}catch(e){}
   }
   return objects.length===1?objects[0]:null;
 }
-function visitActionPayload(answer){return singleStructuredObject(answer,'actions');}
+function visitActionPayload(answer){return singleStructuredObject(answer,['patientId','reply','actions','suggestions']);}
 function isVisitActionAnswer(answer){
   // Detection must include malformed envelopes so they cannot fall through as prose.
   return /[{,]\s*["']?(?:patientId|reply|actions|suggestions)["']?\s*:/.test(answer);
@@ -3473,7 +3475,7 @@ function buildAgentPrompt(c){
     "A corrected statement is not itself an unresolved contradiction. Do not infer medication use from a printed list. "+
     "A promised label, photo, or pharmacy message is not available evidence until it is actually supplied.\n\n"+
     "Do not assign or output a queue priority. Queue ordering is a separate automatic whole-queue workflow.\n\n"+
-    "This is the information-gathering stage. Finish with Needs review. Do not offer appointment dates, action cards, orders, prescriptions, lab requests, or an after-visit summary. Those belong to the later clinician-plan conversation, even if the intake or earlier chat mentions follow-up. Do not use demo-visit-actions for this summary. Return ONLY one JSON object with patientId, reply (the four-section Markdown handoff), actions:[], and suggestions:[]. Both arrays must be empty for a summary.\n\n"+
+    "This is the information-gathering stage. Finish with Needs review. Do not offer appointment dates, action cards, orders, prescriptions, lab requests, or an after-visit summary. Those belong to the later clinician-plan conversation, even if the intake or earlier chat mentions follow-up. Do not use demo-visit-actions for this summary. Return ONLY one JSON object with patientId and reply (the four-section Markdown handoff). Omit actions and suggestions; if included, both arrays must be empty for a summary.\n\n"+
     "Set patientId to exactly "+JSON.stringify(c.patientId)+" (the bare ID, without the Patient/ prefix). Do not put prose or code fences around the JSON object.\n\n"+
     "NURSE INTAKE TRANSCRIPT\n"+transcriptText(c);
 }
@@ -4372,7 +4374,7 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
           (s.queueProposal?"Latest queue review result (supported placements are applied automatically):\n"+queueProposalMarkdown(s.queueProposal)+"\n\n":"")+
           (snapshot.sessionId?"":"Earlier conversation:\n"+
             snapshot.messages.filter(m=>!m.status).map(m=>m.role+": "+m.content).join("\n")+"\n\n")+
-          "END BACKGROUND. CURRENT CLINICIAN MESSAGE: "+JSON.stringify(text)+"\n\nBefore the final answer, load demo-visit-actions. Answer the current question first. A focused blood-result/monitoring question that reveals a relevant unresolved testing gap should include a conversational lab offer and matching suggestions metadata, quoting that clinician question. Keep actions empty until the clinician agrees. Other evidence-only questions get suggestions:[]; an unfinished step from the intake alone is not a reason to offer actions. Always return one valid JSON object with double-quoted patientId, reply, actions and suggestions keys, even if both arrays are empty. Put the complete answer and citations in reply, never another JSON object or schema example. When the clinician has a plan but its action details are missing, offer the next step conversationally in reply with matching suggestions metadata. When discussing the next appointment or follow-up, proactively offer follow_up so the three real demo slots appear immediately; ask which works and accept a chat reply, without a button gate. For example, clinician-planned blood tests with unspecified tests/reason support a lab suggestion quoting that plan. Use actions only for explicit draft requests. Do not invent clinical decisions.";
+          "END BACKGROUND. CURRENT CLINICIAN MESSAGE: "+JSON.stringify(text)+"\n\nAnswer the current question first. Load demo-visit-actions only when preparing action cards or relevant workflow offers. A focused blood-result/monitoring question that reveals a relevant unresolved testing gap should include a conversational lab offer and matching suggestions metadata, quoting that clinician question. Do not include actions until the clinician agrees. Other evidence-only questions need no suggestions; an unfinished step from the intake alone is not a reason to offer actions. Return one valid JSON object with double-quoted patientId and reply keys. actions and suggestions are optional; omit either when it has no entries. Put the complete answer and citations in reply, never another JSON object or schema example. When the clinician has a plan but its action details are missing, offer the next step conversationally in reply with matching suggestions metadata. When discussing the next appointment or follow-up, proactively offer follow_up so the three real demo slots appear immediately; ask which works and accept a chat reply, without a button gate. For example, clinician-planned blood tests with unspecified tests/reason support a lab suggestion quoting that plan. Use actions only for explicit draft requests. Do not invent clinical decisions.";
       },
       transformAnswer(answer,request){
         if(epoch!==chatEpoch)return answer;

@@ -132,9 +132,11 @@ works. Do not imply a date meets an interval when it does not.
 
 ## Response contract
 
-When the dashboard requests its patient-chat envelope, always return ONLY one
-JSON object, with empty arrays when no action or suggestion fits. Keep the
-complete answer, including retrieved evidence citations, in `reply`.
+When the dashboard requests its patient-chat envelope, return one JSON object
+with `patientId` and `reply`. `actions` and `suggestions` are optional: omit either
+when it has no entries. The dashboard treats omitted fields as empty arrays.
+Keep the complete answer, including retrieved evidence citations, in `reply`.
+Ordinary evidence answers do not require loading this skill.
 
 Use valid JSON with double-quoted keys and strings, without surrounding prose or
 code fences. `reply` must be nonempty clinician-facing Markdown only: never put a
@@ -146,7 +148,6 @@ For example:
 {
   "patientId": "copy the provided ID",
   "reply": "Answer the clinician's question here.",
-  "actions": [],
   "suggestions": [
     {"type": "lab", "evidence": "Exact quote from the supplied discussion"}
   ]
@@ -175,6 +176,6 @@ order details.
 
 For a handoff, follow its dedicated four-section contract and offer no workflow
 actions. If the dashboard requests the JSON envelope, put only the handoff in
-`reply` and leave both arrays empty. In dashboard Q&A, use empty arrays when
-there is no relevant testing-gap offer or planned next step. Never sacrifice the answer or its
-evidence citations to offer a next step.
+`reply` and omit action/suggestion metadata. In dashboard Q&A, omit either array
+when there is no corresponding action or offer. Never sacrifice the answer or
+its evidence citations to offer a next step.
