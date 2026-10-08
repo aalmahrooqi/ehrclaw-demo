@@ -2984,17 +2984,27 @@ function parseVisitActions(answer,c,sources,suggestionSources=visitSuggestionSou
   if(!reply)fail('reply must contain a readable answer, not embedded action JSON or schema examples.');
   const contains=text=>sources.toLowerCase().includes(text.toLowerCase());
   const actions=requestedActions.map(a=>{
+    const suppliedDetails=a?.details==null?{}:a.details;
     if(!Object.hasOwn(VISIT_FIELDS,a?.type)||typeof a.instruction!=='string'||a.instruction.trim().length<1||
-      a.instruction.length>2000||!contains(a.instruction.trim())||!a.details||typeof a.details!=='object'||Array.isArray(a.details))
-      fail('Each action needs a supported type, an exact clinician instruction quote (1–2000 characters), and a details object.');
+      a.instruction.length>2000||!contains(a.instruction.trim())||typeof suppliedDetails!=='object'||Array.isArray(suppliedDetails))
+      fail('Each action needs a supported type and an exact clinician instruction quote (1–2000 characters). details, when present, must be an object.');
     const keys=VISIT_FIELDS[a.type].map(([key])=>key);
-    if(Object.keys(a.details).some(key=>!keys.includes(key)))fail('Use only the permitted detail keys for each action type.');
     const details={};
     for(const key of keys){
-      const value=a.details[key]??'';
-      if(typeof value!=='string'||value.length>300||(/[\u0000-\u001f]/.test(value))||(value.trim()&&!contains(value.trim())))
-        fail('Detail values must be plain strings of at most 300 characters, copied exactly from clinician sources. Leave unspecified fields empty; never invent or infer them.');
-      details[key]=value.trim();
+      const value=suppliedDetails[key]??'';
+      if(typeof value!=='string'||value.length>300||(/[\u0000-\u001f]/.test(value)))
+        fail('Detail values must be plain strings of at most 300 characters. Leave unspecified fields empty.');
+      const clean=value.trim();
+      if(clean&&!contains(clean)){
+        // Optional display fields may be cleared without weakening validation
+        // of medication, dose, test, imaging, or other required order details.
+        if((a.type==='follow_up'&&key==='reason')||
+           (a.type==='prescription'&&['quantity','pharmacy'].includes(key))){
+          details[key]='';continue;
+        }
+        fail('Required detail values must be copied exactly from clinician sources. Leave unavailable details empty; never invent or infer them.');
+      }
+      details[key]=clean;
     }
     return {id:crypto.randomUUID(),patientId:c.patientId,type:a.type,status:'proposed',instruction:a.instruction.trim(),details,
       createdAt:new Date().toISOString(),...(a.type==='follow_up'?{options:visitSlots(c),selectedSlotId:''}:{})};
@@ -3422,12 +3432,17 @@ function parseAfterVisitSummary(answer,c,sourceSnapshot=visitSourceSnapshot(getS
   const fail=()=>{throw new Error('The agent did not return a source-verified visit plan for this patient. Your previous summary is kept; please try again.');};
   if(!data||data.patientId!==c.patientId||!Array.isArray(data.plan)||data.plan.length>12)fail();
   const plan={care:[],medicines:[],followUp:[],whenToGetHelp:[]};
+  const normalizeQuote=value=>String(value).normalize('NFKC')
+    .replace(/[\u2018\u2019]/g,"'").replace(/[\u201c\u201d]/g,'"')
+    .replace(/[\u2010-\u2015]/g,'-').replace(/\s+/g,' ').trim();
+  let skippedPlanItems=0;
   for(const item of data.plan){
     const source=sources.find(source=>source.id===item?.sourceId);
-    if(!sections.includes(item?.section)||typeof item.quote!=='string'||item.quote.trim().length<5||item.quote.length>2000||
-      !source||!source.text.includes(item.quote)||item.quote.trim().endsWith('?')||
-      typeof item.text!=='string'||item.text.trim().length<5||item.text.length>2000||
-      /(^|\n)\s*(?:>|#{1,6}\s|```)|your care team recorded|before sharing the draft/i.test(item.text))fail();
+    const valid=sections.includes(item?.section)&&typeof item.quote==='string'&&item.quote.trim().length>=5&&item.quote.length<=2000&&
+      source&&normalizeQuote(source.text).includes(normalizeQuote(item.quote))&&!item.quote.trim().endsWith('?')&&
+      typeof item.text==='string'&&item.text.trim().length>=5&&item.text.length<=2000&&
+      !/(^|\n)\s*(?:>|#{1,6}\s|```)|your care team recorded|before sharing the draft/i.test(item.text);
+    if(!valid){skippedPlanItems++;continue;}
     // Verify provenance with the source quote; render only the patient paraphrase.
     if(!plan[item.section].includes(item.text.trim()))plan[item.section].push(item.text.trim());
   }
@@ -3449,6 +3464,7 @@ function parseAfterVisitSummary(answer,c,sourceSnapshot=visitSourceSnapshot(getS
   if(prescriptions.length)questions.push('Review your medication instructions with your clinician; submission does not check medication safety.');
   if(!plan.followUp.length&&!bookings.length&&!xrays.length&&!labs.length)questions.push('Confirm your next steps and follow-up.');
   if(!plan.whenToGetHelp.length)questions.push('Confirm when and how to seek help.');
+  if(skippedPlanItems)questions.push('Confirm plan details that could not be verified against the visit notes.');
   for(const a of (snapshot.actions||[]).filter(a=>a.status==='proposed'))questions.push('Review the unconfirmed '+VISIT_LABELS[a.type].toLowerCase()+'. It is not a confirmed action.');
   if((snapshot.actions||[]).some(a=>a.status==='cancelled'))questions.push('Cancelled demo actions are excluded from this plan.');
   const values={
@@ -3527,11 +3543,18 @@ function parseQueueReview(value,snapshot,runId){
     const patient=snapshot.patients.find(p=>p.patientId===result?.patientId&&p.caseId===result?.caseId);
     if(!patient||seen.has(patient.patientId))throw new Error("The queue review included a duplicate or unknown patient. No placements were changed.");
     seen.add(patient.patientId);
-    if(!Array.isArray(result.factors)||result.factors.some(f=>f?.patientId!==patient.patientId))
+    const factors=Array.isArray(result.factors)?result.factors.map(f=>f&&typeof f==='object'?{
+      ...f,source:typeof f.source==='string'&&f.source.trim().toLowerCase()==='intake'?'intake':f.source
+    }:f):result.factors;
+    if(!Array.isArray(factors)||factors.some(f=>f?.patientId!==patient.patientId))
       throw new Error("Evidence must identify the patient it belongs to. Retry the queue review.");
-    if(result.factors.some(f=>f.source!=="intake"))
+    if(factors.some(f=>f.source!=="intake"))
       throw new Error("The review for "+patient.name+" must use intake transcript evidence only. Reassess the queue; applied placements are unchanged.");
-    const parsed=parseQueueProposal(JSON.stringify(result),patient);
+    const reviewItems=Array.isArray(result.needsReview)?result.needsReview:
+      typeof result.needsReview==='string'?[result.needsReview]:[];
+    const needsReview=reviewItems.filter(item=>typeof item==='string'&&item.trim()&&item.length<=500)
+      .slice(0,3).map(item=>item.trim());
+    const parsed=parseQueueProposal(JSON.stringify({...result,factors,needsReview}),patient);
     return {...parsed,caseId:patient.caseId,runId};
   });
   return {id:runId,createdAt:new Date().toISOString(),results};
@@ -4491,7 +4514,8 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
           if(!payload||typeof payload.patientId!=='string'||!payload.patientId.trim())
             throw new Error('CliniClaw returned an unreadable handoff format. Please retry.');
           // FHIR references and bare IDs identify the same patient; other forms stay invalid.
-          if(payload.patientId!==c.patientId&&payload.patientId!=='Patient/'+c.patientId)
+          const handoffPatientId=payload.patientId.trim();
+          if(handoffPatientId!==c.patientId&&handoffPatientId!=='Patient/'+c.patientId)
             throw new Error('The handoff response did not match this patient. Please retry.');
           if(typeof payload.reply!=='string'||!payload.reply.trim()||payload.reply.length>20000)
             throw new Error('CliniClaw did not return a readable handoff. Please retry.');
