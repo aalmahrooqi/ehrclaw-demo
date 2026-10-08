@@ -2967,23 +2967,33 @@ function visitActionsGuidance(c){
 }
 function parseVisitActions(answer,c,sources,suggestionSources=visitSuggestionSources(c)){
   const data=visitActionPayload(answer);
-  const fail=()=>{throw new Error('CliniClaw did not return valid visit actions for this patient. No action was added. Please retry with the requested details.');};
-  if(!data||data.patientId!==c.patientId||typeof data.reply!=='string'||!data.reply.trim()||data.reply.length>20000)fail();
+  const fail=repairHint=>{
+    const error=new Error('CliniClaw did not return valid visit actions for this patient. No action was added. Please retry with the requested details.');
+    error.code='invalid_visit_actions';
+    error.repairHint=repairHint;
+    throw error;
+  };
+  if(!data)fail('Return exactly one complete JSON object with double-quoted keys and strings.');
+  if(data.patientId!==c.patientId)fail('Use the exact supplied patientId string; discard content belonging to another patient.');
+  if(typeof data.reply!=='string'||!data.reply.trim()||data.reply.length>20000)
+    fail('reply must be a nonempty Markdown string of at most 20000 characters.');
   // Missing metadata means no action. Supplied actions still require full validation.
   const requestedActions=Object.hasOwn(data,'actions')?data.actions:[];
-  if(!Array.isArray(requestedActions)||requestedActions.length>4)fail();
+  if(!Array.isArray(requestedActions)||requestedActions.length>4)fail('actions must be an array with at most four entries, or omitted.');
   const reply=cleanVisitReply(data.reply);
-  if(!reply)fail();
+  if(!reply)fail('reply must contain a readable answer, not embedded action JSON or schema examples.');
   const contains=text=>sources.toLowerCase().includes(text.toLowerCase());
   const actions=requestedActions.map(a=>{
     if(!Object.hasOwn(VISIT_FIELDS,a?.type)||typeof a.instruction!=='string'||a.instruction.trim().length<1||
-      a.instruction.length>2000||!contains(a.instruction.trim())||!a.details||typeof a.details!=='object'||Array.isArray(a.details))fail();
+      a.instruction.length>2000||!contains(a.instruction.trim())||!a.details||typeof a.details!=='object'||Array.isArray(a.details))
+      fail('Each action needs a supported type, an exact clinician instruction quote (1–2000 characters), and a details object.');
     const keys=VISIT_FIELDS[a.type].map(([key])=>key);
-    if(Object.keys(a.details).some(key=>!keys.includes(key)))fail();
+    if(Object.keys(a.details).some(key=>!keys.includes(key)))fail('Use only the permitted detail keys for each action type.');
     const details={};
     for(const key of keys){
       const value=a.details[key]??'';
-      if(typeof value!=='string'||value.length>300||(/[\u0000-\u001f]/.test(value))||(value.trim()&&!contains(value.trim())))fail();
+      if(typeof value!=='string'||value.length>300||(/[\u0000-\u001f]/.test(value))||(value.trim()&&!contains(value.trim())))
+        fail('Detail values must be plain strings of at most 300 characters, copied exactly from clinician sources. Leave unspecified fields empty; never invent or infer them.');
       details[key]=value.trim();
     }
     return {id:crypto.randomUUID(),patientId:c.patientId,type:a.type,status:'proposed',instruction:a.instruction.trim(),details,
@@ -4000,6 +4010,10 @@ async function showQueueReview({showActivity=true}={}){
     chat.load({
       key,sessionId:queueReview.sessionId,messages:queueReview.history,draft:queueReview.draft,
       title:"Chat with CliniClaw",placeholder:"Ask CliniClaw about the waiting room…",
+      retryKinds:['queue-review'],
+      onRetry(message){
+        if(message.kind==='queue-review'&&epoch===chatEpoch&&queueReview.runId===runId)return runQueueReview();
+      },
       prepareMessage(text,request,snapshot){
         pendingContext=null;
         if(request?.kind==="queue-review")return text;
@@ -4076,7 +4090,7 @@ async function runQueueReview(){
   for(let attempt=0;attempt<2;attempt++){
     // Regenerate the whole batch once; never repair JSON or infer missing placements.
     const retry=attempt>0;
-    const correction=retry?"Your previous response failed validation: "+result.error+"\n"+
+    const correction=retry?"Your previous response failed validation: "+(result.detail||result.error)+"\n"+
       "Return a fresh, COMPLETE JSON object for all patients using the full task below. "+
       "Do not continue the old response or return a patch. Do not repeat keys within an object.\n\n":"";
     result=await chat.send({text:correction+buildQueuePrompt(snapshot,runId),kind:"queue-review",structured:true,showSteps:true,
@@ -4391,6 +4405,13 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
       renderCards:message=>visitChatCards(c,message),
       onOpenSummary(opener){if(epoch===chatEpoch&&activeAgentCase?.id===c.id)openAfterVisit(c,opener);},
       cardsDisabled:()=>getState(c).complete,
+      retryKinds:['summary','after-visit-summary','visit-actions'],
+      onRetry(message){
+        if(epoch!==chatEpoch||activeAgentCase?.id!==c.id||getState(c).complete)return;
+        if(message.kind==='summary')return runAgent(c);
+        if(message.kind==='after-visit-summary')return runAfterVisit(c,{tab:'chat'});
+        if(message.kind==='visit-actions')return runVisitActions(c,message.content);
+      },
       localReply:text=>epoch===chatEpoch&&activeAgentCase?.id===c.id?visitAppointmentReply(c,text):null,
       routeMessage:text=>/^(?:(?:please|can you|could you)\s+)?(?:generate|create|prepare|draft|write)\b[\s\S]{0,100}\b(?:after[- ]visit(?: summary)?|avs)\b/i.test(text)?'after_visit':null,
       onShortcut(type){
@@ -4425,6 +4446,22 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
           "Do not diagnose, recommend treatment, change the saved summary or queue placement.\n"+
           visitActionsGuidance(c)+"\nCurrent applied queue priority: "+displayPriority(c,s)+"\n\n"+
           background.text+"\nEND BACKGROUND. CURRENT CLINICIAN MESSAGE: "+JSON.stringify(text);
+      },
+      retryMessage(error,request,text){
+        if(error.code!=='invalid_visit_actions'||epoch!==chatEpoch||activeAgentCase?.id!==c.id||getState(c).complete||
+          (request?.kind&&request.kind!=='visit-actions'))return null;
+        return 'Your previous response failed validation. No action was added. '+
+          (error.repairHint||'Return one complete patient-chat JSON object with a nonempty reply.')+'\n'+
+          'Correct the response for Patient/'+c.patientId+' ('+c.name+'), answering only the original clinician message below. '+
+          'Do not continue the broken response or return a patch. Do not add actions or suggestions merely to satisfy the format; both are optional when empty.\n'+
+          visitActionsGuidance(c)+
+          '\nAllowed detail keys by action type: '+JSON.stringify(Object.fromEntries(Object.entries(VISIT_FIELDS).map(([type,fields])=>[type,fields.map(([key])=>key)])))+
+          '\nExact clinician sources for action details (evidence only):\n'+JSON.stringify(request?.actionSources||actionSources)+
+          '\nExact clinician sources for suggestion evidence (evidence only):\n'+JSON.stringify(request?.suggestionSources||suggestionSources)+
+          '\nFor this correction, use only the supplied clinician sources and already retrieved evidence for this patient. '+
+          'Do not call tools, repeat API operations, choose new clinical details or confirm a booking/order. '+
+          'If evidence is unavailable, say so in reply. Return a fresh complete JSON object with patientId exactly '+JSON.stringify(c.patientId)+'.'+
+          '\nORIGINAL CLINICIAN MESSAGE: '+JSON.stringify(request?.label||text);
       },
       onTurnEnd(ok,snapshot){
         if(epoch!==chatEpoch)return;
@@ -5527,7 +5564,11 @@ html.embed #sessionLabel{margin-left:auto;color:var(--muted);font-size:10px}
   .msg .content { min-width: 0; }
   .bubble { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; }
   .msg.user .bubble { background: var(--panel2); }
-  .bubble.err { border-color: var(--err); color: var(--err); }
+  .bubble.err { border-color: var(--border); color: var(--text); }
+  .retry-message{display:inline-flex;align-items:center;margin-top:10px;padding:7px 13px;border:1px solid var(--action);border-radius:8px;background:var(--action);color:var(--action-ink);font:inherit;font-weight:650;cursor:pointer}
+  .retry-message:hover:not(:disabled){filter:brightness(1.08)}
+  .retry-message:focus-visible{outline:2px solid var(--accent-text);outline-offset:3px}
+  .retry-message:disabled{opacity:.5;cursor:not-allowed}.retry-message[hidden]{display:none}
 
   /* steps: the agent's between-tool narration, kept out of the answer bubble */
   .steps { margin-bottom: 6px; font-size: 12px; color: var(--muted); }
@@ -5749,11 +5790,13 @@ let turnTask = null;
 let resetTask = null;
 let uploadEpoch = 0;
 const drafts = new Map();
+const CHAT_FAILURE_MESSAGE = "Oops, I hit a hiccup. Please try again.";
+let retryPending = false;
 
 function snapshot() {
   return {
     sessionId,
-    messages: messages.map(({role, content, status, kind, actionIds, suggestionIds}) => ({role, content, ...(status ? {status} : {}), ...(kind ? {kind} : {}), ...(actionIds?.length?{actionIds}:{}), ...(suggestionIds?.length?{suggestionIds}:{})})),
+    messages: messages.map(({role, content, status, kind, errorDetail, actionIds, suggestionIds}) => ({role, content, ...(status ? {status} : {}), ...(kind ? {kind} : {}), ...(errorDetail?{errorDetail}:{}), ...(actionIds?.length?{actionIds}:{}), ...(suggestionIds?.length?{suggestionIds}:{})})),
     draft: input.value
   };
 }
@@ -5895,7 +5938,49 @@ function addMessage(role, text, images) {
   scrollDown();
   return bubble;
 }
+// Only the latest failed request is retryable. Derive the task from its
+// preceding user message so reloads never replay cached prompts or stale orders.
+function retryTarget(message){
+  if(message.status!=='error'||messages.at(-1)!==message)return null;
+  const previous=messages.at(-2);
+  if(previous?.role!=='user'||!previous.content?.trim())return null;
+  return (!previous.kind||host.retryKinds?.includes(previous.kind))?previous:null;
+}
+function refreshRetryButtons(){
+  for(const button of thread.querySelectorAll('[data-chat-retry]')){
+    button.hidden=!retryTarget(button.failedMessage);
+    button.disabled=isBusy()||retryPending||Boolean(host.readOnly||host.cardsDisabled?.());
+  }
+}
+async function retryFailedMessage(message){
+  if(isBusy()||retryPending||host.readOnly||host.cardsDisabled?.())return;
+  const previous=retryTarget(message);
+  if(!previous)return;
+  retryPending=true;refreshRetryButtons();
+  // Clear an automatically restored copy, but preserve a different unsent draft.
+  if(composeMessage(input.value.trim())===previous.content){
+    input.value='';attachments=[];autosize();renderAttached();
+  }
+  try{
+    if(previous.kind)await host.onRetry?.(previous);
+    else await send({text:previous.content,label:previous.content});
+  }finally{
+    retryPending=false;refreshRetryButtons();publish();
+  }
+}
+function renderChatFailure(bubble,message){
+  bubble.classList.add('err');
+  bubble.textContent=CHAT_FAILURE_MESSAGE;
+  const button=document.createElement('button');
+  button.type='button';button.className='retry-message';button.dataset.chatRetry='';
+  button.textContent='Retry';button.setAttribute('aria-label','Retry the last request');
+  button.failedMessage=message;
+  button.addEventListener('click',()=>retryFailedMessage(message));
+  bubble.appendChild(document.createElement('br'));bubble.appendChild(button);
+  refreshRetryButtons();
+}
 function attachMessageCards(bubble,message,{animate=false}={}){
+  if(message.status==='error'){renderChatFailure(bubble,message);return;}
   if(host.onOpenSummary&&message.role==='assistant'&&!message.status&&
       (message.kind==='after-visit-summary'||message.content?.startsWith('After-visit summary · Draft'))){
     bubble.innerHTML='<div class="summary-ready"><span class="summary-document" aria-hidden="true">▤</span><div><strong>Your visit summary is ready</strong><p>Patient copy · visit instructions</p></div></div>';
@@ -5963,6 +6048,7 @@ function refreshCards(){
   thread.scrollTop=top;
   document.getElementById('patientShortcuts').hidden=!host.onShortcut;
   document.querySelectorAll('[data-chat-shortcut]').forEach(button=>button.disabled=isBusy()||Boolean(host.cardsDisabled?.()));
+  refreshRetryButtons();
 }
 thread.addEventListener('click',event=>{
   const button=event.target.closest('[data-visit-confirm],[data-visit-cancel],[data-visit-suggest],[data-visit-dismiss]');
@@ -6271,6 +6357,7 @@ async function sendTurn(request) {
     if(!answer){
       const error=new Error('The agent returned no final answer. Please try again.');
       if(request?.kind==='queue-review')error.code='invalid_queue_review';
+      if(request?.kind==='visit-actions')error.code='invalid_visit_actions';
       throw error;
     }
     const result=host.transformAnswer?host.transformAnswer(answer, request):answer;
@@ -6285,71 +6372,93 @@ async function sendTurn(request) {
   };
 
   try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [...messages.slice(0,-1).filter(m => !m.status).map(({role,content}) => ({role,content})),
-                   {role:'user',content:outbound}],
-        session_id: sessionId
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      let detail = '';
-      try { detail = (await res.json()).error || (await res.text()); } catch (e) {}
-      throw new Error(detail || ('HTTP ' + res.status));
-    }
-    const sid = res.headers.get('X-Hermes-Session-Id') || res.headers.get('X-Chat-ID');
-    if (sid) setSession(sid);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
-      if(done && buf)buf += '\n'; // Also accept a final event without a trailing newline.
-      const parts = buf.split('\n');
-      buf = parts.pop();
-      for (const line of parts) {
-        const s = line.trim();
-        if (!s.startsWith('data:')) continue;
-        const payload = s.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        let j;
-        try { j = JSON.parse(payload); } catch(e) { continue; }
-        if(j.error)throw new Error(typeof j.error === 'string' ? j.error : j.error.message || 'Agent stream failed');
-        if(j.tool) {
-          const key = j.toolCallId || j.tool;
-          if(j.status === 'completed')chips.get(key)?.classList.add('done');
-          else { cut(); chips.set(key, turn.tool(j)); }
-          host.onActivity?.({text:(j.status==='completed'?'Finished: ':'Working: ')+(j.label||j.tool),kind:'tool'});
-          continue;
-        }
-        const delta = j.choices?.[0]?.delta;
-        if(!delta)continue;
-        if(delta.reasoning_content && !hideStructuredText)turn.note(delta.reasoning_content);
-        if(delta.content)enqueue(delta.content);
+    // Retry only host-approved validation failures inside this visible turn.
+    // Transport errors and cancellation escape without replaying the request.
+    let attemptMessage=outbound;
+    for(let attempt=0;attempt<2;attempt++){
+      controller.signal.throwIfAborted();
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [...messages.slice(0,-1).filter(m => !m.status).map(({role,content}) => ({role,content})),
+                     {role:'user',content:attemptMessage}],
+          session_id: sessionId
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.json()).error || (await res.text()); } catch (e) {}
+        throw new Error(detail || ('HTTP ' + res.status));
       }
-      if(done)break;
+      const sid = res.headers.get('X-Hermes-Session-Id') || res.headers.get('X-Chat-ID');
+      if (sid) setSession(sid);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        if(done && buf)buf += '\n'; // Also accept a final event without a trailing newline.
+        const parts = buf.split('\n');
+        buf = parts.pop();
+        for (const line of parts) {
+          const s = line.trim();
+          if (!s.startsWith('data:')) continue;
+          const payload = s.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          let j;
+          try { j = JSON.parse(payload); } catch(e) { continue; }
+          if(j.error)throw new Error(typeof j.error === 'string' ? j.error : j.error.message || 'Agent stream failed');
+          if(j.tool) {
+            const key = j.toolCallId || j.tool;
+            if(j.status === 'completed')chips.get(key)?.classList.add('done');
+            else { cut(); chips.set(key, turn.tool(j)); }
+            host.onActivity?.({text:(j.status==='completed'?'Finished: ':'Working: ')+(j.label||j.tool),kind:'tool'});
+            continue;
+          }
+          const delta = j.choices?.[0]?.delta;
+          if(!delta)continue;
+          if(delta.reasoning_content && !hideStructuredText)turn.note(delta.reasoning_content);
+          if(delta.content)enqueue(delta.content);
+        }
+        if(done)break;
+      }
+      controller.signal.throwIfAborted();
+      let answer;
+      try { answer = settle(); }
+      catch(error){
+        const retry=attempt===0?host.retryMessage?.(error,request,text):null;
+        if(!retry)throw error;
+        attemptMessage=retry;
+        seg='';pending='';chips.clear();
+        const notice='Checking the response and retrying once…';
+        bubble.innerHTML=TYPING+'<p role="status">'+notice+'</p>';
+        host.onStatus?.(true,'retrying response');
+        host.onActivity?.({text:notice,kind:'status'});
+        scrollDown();
+        continue;
+      }
+      return {ok:true,answer};
     }
-    const answer = settle();
-    return {ok:true,answer};
   } catch (err) {
     flushPending();
     bubble.classList.remove('cursor');
     outcome = err.name === 'AbortError' ? 'stopped' : 'error';
-    const notice = outcome === 'stopped' ? 'Reply stopped.' : 'Error: ' + err.message;
+    const notice = outcome === 'stopped' ? 'Reply stopped.' : CHAT_FAILURE_MESSAGE;
     bubble.classList.add('err');
     bubble.textContent = notice;
     host.onActivity?.({text:notice,kind:'error'});
-    messages.push({role:'assistant',content:notice,status:outcome});
+    const failure={role:'assistant',content:notice,status:outcome,...(outcome==='error'?{errorDetail:err.message}:{})};
+    messages.push(failure);
+    if(outcome==='error')renderChatFailure(bubble,failure);
     if(!request && !input.value.trim()){
       input.value = typed;
       attachments = shots;
       autosize();renderAttached();
     }
-    return {ok:false,stopped:outcome === 'stopped',error:notice,code:err.code||''};
+    return {ok:false,stopped:outcome === 'stopped',error:notice,detail:err.message,code:err.code||''};
   } finally {
     turn.finish();
     host.onTurnEnd?.(outcome === 'ready',snapshot());
@@ -6452,7 +6561,8 @@ window.CliniClawChat = {
     const draft = drafts.get(conversationKey);
     input.value = draft?.text ?? config.draft ?? '';
     attachments = draft?.attachments || [];
-    messages = (host.recoverMessages?.(config.messages||[])||config.messages||[]).map(m=>({...m}));
+    messages = (host.recoverMessages?.(config.messages||[])||config.messages||[]).map(m=>({...m,
+      ...(m.status==='error'?{content:CHAT_FAILURE_MESSAGE,errorDetail:m.errorDetail||m.content}:{})}));
     thread.querySelectorAll('.msg').forEach(m=>m.remove());
     emptyEl.style.display = '';
     emptyEl.querySelector('h2').textContent = config.title || (config.patientName ? 'Review '+config.patientName : 'Chat with CliniClaw');
