@@ -18,6 +18,7 @@ fi
 docker compose -f docker-compose.dashboard.yaml up -d
 
 SANDBOX_NAME="hermes-health"
+HERMES_MAX_TOKENS="${HERMES_MAX_TOKENS:-16384}"
 NEMOCLAW_SOURCE="${NEMOCLAW_SOURCE:-${HOME}/.nemoclaw/source}"
 DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 EHR_EXPERT="${SCRIPT_DIR}/agents/ehr-expert"
@@ -96,6 +97,10 @@ NEMOCLAW_SANDBOX_GPU=0 \
         --name "${SANDBOX_NAME}" \
         --non-interactive \
         --from "${STAGING}/Dockerfile"
+
+echo "--- Configuring Hermes output limit (${HERMES_MAX_TOKENS} tokens) ---"
+nemoclaw "${SANDBOX_NAME}" exec --no-tty --timeout 30 -- \
+    /usr/local/bin/hermes.real config set model.max_tokens "${HERMES_MAX_TOKENS}"
 
 openshell policy set ${SANDBOX_NAME} --policy "${SCRIPT_DIR}/policy/policy.yaml" --wait
 echo "=== Done. Connect with: ==="
