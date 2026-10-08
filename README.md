@@ -267,7 +267,7 @@ workflow must also be reassessed. Results needing more information preserve any 
 placement, including an immediate-attention placement. Previously
 unranked patients remain Pending; this does not imply low urgency.
 
-**Dorsey Aurelio Macejkovic (Patient/65157)** has a focused, fictional in-person
+**Dorsey Aurelio Macejkovic (Patient/63738)** has a focused, fictional in-person
 chest-pain intake. The nurse asks about onset, location, pain severity (eight out
 of ten), spread into the left arm, changes with position or breathing, and
 associated breathlessness, sweating, nausea, and lightheadedness. The longer
@@ -280,7 +280,7 @@ attention**, the completed review automatically moves him to the red section. Th
 The scenario references [NIH heart-attack warning-sign guidance](https://www.nhlbi.nih.gov/health/heart-attack/symptoms).
 This is a demonstration, not validated clinical triage: real clinical care must
 never wait for AI or this simulated workflow. The app sends no actual
-emergency notification. Historical Condition/65992, dated July 14, 2023, does not
+emergency notification. Historical Condition/64573, dated July 14, 2023, does not
 establish today's diagnosis. The revised scenario has a fresh local state key;
 older medication-review, preset-escalation, and brief-intake conversations remain stored
 separately and cannot assign priority or contaminate the new run.
@@ -289,7 +289,7 @@ Applied immediate-attention placements remain visible in the patient list.
 The patient-detail and chat views do not repeat the alert banner or require
 acknowledgment. Filtering other reviews does not hide the applied placement.
 
-**Carmen Evan Wiegand (Patient/40575)** replaces Norbert in the waiting room.
+**Carmen Evan Wiegand (Patient/39153)** replaces Norbert in the waiting room.
 His fictional intake describes a week of knee pain and a question about trying
 ibuprofen/Advil, which he has not started. The chart supplies a separate story:
 knee osteoarthritis, heart and kidney history, and active prescription records

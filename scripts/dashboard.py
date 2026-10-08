@@ -2112,8 +2112,8 @@ const PIXEL_PORTRAITS = {
   guest:{bg:"#e2e9df",spark:"#becfba",skin:"#c8916e",shade:"#a56a4e",hair:"#51433e",highlight:"#806554",cut:"short",shirt:"#788b75",trim:"#51604f"}
 };
 const PATIENT_PORTRAITS = {
-  "117274":"paul","59380":"dara","87745":"florence",
-  "96320":"jacques","40575":"carmen","65157":"dorsey"
+  "115855":"paul","57958":"dara","86326":"florence",
+  "94901":"jacques","39153":"carmen","63738":"dorsey"
 };
 function patientPortrait(c){ return PATIENT_PORTRAITS[c.patientId] || "guest"; }
 function pixelPortraitShapes(p,backdrop=true){
@@ -2189,7 +2189,7 @@ function speakerHtml(c,speaker){
 
 const CASES = [
   {
-    id:"CASE-1042", stateKey:"CASE-1042-school-allergies-v2", patientId:"117274", name:"Paul Bennie Smitham", initials:"PS",
+    id:"CASE-1042", stateKey:"CASE-1042-school-allergies-v3", patientId:"115855", name:"Paul Bennie Smitham", initials:"PS",
     identity:"12 years · male · Brookline", reason:"Sneezing and itchy eyes affecting school",
     status:"Ready for review", owner:"", wait:"12 min", currentStep:3, source:"Nurse intake · 09:42",
     scenarioNote:"Fictional in-person demo intake. Symptoms and daily-life details are scripted patient reports, not stored FHIR observations; chart evidence is checked separately.",
@@ -2231,12 +2231,12 @@ const CASES = [
     chart:["Active seasonal allergic rhinitis","Active fexofenadine and epinephrine auto-injector orders","Charted orders do not confirm doses actually given during this episode"],
     confirm:["Assess current eye and nasal symptoms and their effect on sleep and school","Confirm possible triggers without assuming an outdoor pattern proves the cause","Verify the tablet label and recent doses with the family"],
     prompts:{
-      summary:"Prepare a pre-visit review for synthetic Patient/117274 (Paul Bennie Smitham). Lead with the symptoms, corrected ten-day timeline, sleep disruption, and school/activity impact, not a medication-review request. Preserve Paul's own account as well as his parent's. Check relevant allergy history in FHIR separately; charted orders do not establish actual use. Do not diagnose, recommend treatment, or provide sports clearance.\n\n",
-      meds:"Review the active medication record for synthetic Patient/117274 (Paul Bennie Smitham). Report the charted medications and any record gaps only; do not recommend treatment. Use FHIR evidence."
+      summary:"Prepare a pre-visit review for synthetic Patient/115855 (Paul Bennie Smitham). Lead with the symptoms, corrected ten-day timeline, sleep disruption, and school/activity impact, not a medication-review request. Preserve Paul's own account as well as his parent's. Check relevant allergy history in FHIR separately; charted orders do not establish actual use. Do not diagnose, recommend treatment, or provide sports clearance.\n\n",
+      meds:"Review the active medication record for synthetic Patient/115855 (Paul Bennie Smitham). Report the charted medications and any record gaps only; do not recommend treatment. Use FHIR evidence."
     }
   },
   {
-    id:"CASE-1047", stateKey:"CASE-1047-fatigue-intake-v2", patientId:"59380", name:"Dara Armstrong", initials:"DA",
+    id:"CASE-1047", stateKey:"CASE-1047-fatigue-intake-v3", patientId:"57958", name:"Dara Armstrong", initials:"DA",
     identity:"37 years · female · Waltham", reason:"New fatigue and recurrent lightheadedness",
     status:"New intake", owner:"", wait:"18 min", currentStep:2, source:"Nurse intake · 09:36",
     scenarioNote:"Fictional in-person demo intake. Symptoms, menstrual history, and access details are scripted patient reports, not stored FHIR observations; chart evidence is checked separately.",
@@ -2280,12 +2280,12 @@ const CASES = [
     chart:["Active prediabetes and anemia conditions","Prior structured social-needs record mentions difficulty obtaining medical care","Historical diagnoses and pregnancy-status data do not establish the cause or current status"],
     confirm:["Obtain a current assessment and clarify the episodes and bleeding history","Verify requested tests, any existing results, and barriers to attending","Confirm current pregnancy status; do not infer today's cause from historical anemia"],
     prompts:{
-      summary:"Prepare a pre-visit review for synthetic Patient/59380 (Dara Armstrong). Lead with three weeks of fatigue and four days of intermittent lightheadedness, preserving the last episode and stated negatives. Include the heavier last period and uncompleted blood-test visit as intake reports, not measured findings or verified orders. Check relevant FHIR history and results without attributing today's symptoms to historical anemia, prediabetes, or pregnancy data. Do not diagnose or recommend treatment.\n\n",
-      meds:"Reconcile the active medication record for synthetic Patient/59380 (Dara Armstrong). Report active orders, dates, and gaps from FHIR only. Do not recommend treatment."
+      summary:"Prepare a pre-visit review for synthetic Patient/57958 (Dara Armstrong). Lead with three weeks of fatigue and four days of intermittent lightheadedness, preserving the last episode and stated negatives. Include the heavier last period and uncompleted blood-test visit as intake reports, not measured findings or verified orders. Check relevant FHIR history and results without attributing today's symptoms to historical anemia, prediabetes, or pregnancy data. Do not diagnose or recommend treatment.\n\n",
+      meds:"Reconcile the active medication record for synthetic Patient/57958 (Dara Armstrong). Report active orders, dates, and gaps from FHIR only. Do not recommend treatment."
     }
   },
   {
-    id:"CASE-1051", stateKey:"CASE-1051-ankle-intake-v2", patientId:"87745", name:"Florence Lera Predovic", initials:"FP",
+    id:"CASE-1051", stateKey:"CASE-1051-ankle-intake-v3", patientId:"86326", name:"Florence Lera Predovic", initials:"FP",
     identity:"31 years · female · Newton", reason:"Ankle injury with worsening pain and swelling",
     status:"New intake", owner:"", wait:"24 min", currentStep:2, source:"Nurse intake · 09:30",
     scenarioNote:"Fictional in-person demo intake. The ankle injury, symptoms, activity limits, and over-the-counter medicine use are scripted patient reports, not recorded FHIR diagnoses, prescriptions, or imaging results.",
@@ -2333,12 +2333,12 @@ const CASES = [
     chart:["The existing chart includes chronic sinusitis, unrelated to the stated reason for this visit","The scripted ankle injury is not evidence of a charted diagnosis or examination","No injury-specific chart evidence has yet been retrieved for this intake"],
     confirm:["Assess the ankle and current ability to bear weight; patient statements are not examination findings","Verify any relevant injury history without assuming this matches a prior episode","Clarify work limitations; do not invent imaging, a diagnosis, or work clearance","Confirm the Aleve product, dose, and timing; review retrieved drug-label warnings before any decision about adding ibuprofen or choosing an alternative"],
     prompts:{
-      summary:"Prepare a pre-visit review for synthetic Patient/87745 (Florence Lera Predovic). Lead with the new right-ankle injury, worsening swelling, distinct standing/rest pain scores, and corrected walking history. Include the patient-reported OTC Aleve (naproxen sodium) this morning and the unstarted ibuprofen question. The product strength, amount, and exact time are unconfirmed. Keep this report separate from charted prescriptions; an empty medication list does not establish no medicine use. The ankle and OTC-medicine scenario is fictional intake, not an existing FHIR diagnosis or prescription. Retrieve only relevant chart context; unrelated sinusitis history does not explain this visit. If no relevant chart match is found, say so. Do not label this a sprain or fracture, invent imaging or examination findings, or recommend treatment or work clearance.\n\n",
-      meds:"Check the active medication record for synthetic Patient/87745 (Florence Lera Predovic). State exactly what is and is not present in FHIR. Separately include the intake report of OTC Aleve (naproxen sodium) this morning, with unconfirmed strength, amount, and exact time. Ibuprofen is being considered but has not been taken. An empty active-prescription list does not negate reported OTC use; do not interpret absence as safety or recommend a medicine change."
+      summary:"Prepare a pre-visit review for synthetic Patient/86326 (Florence Lera Predovic). Lead with the new right-ankle injury, worsening swelling, distinct standing/rest pain scores, and corrected walking history. Include the patient-reported OTC Aleve (naproxen sodium) this morning and the unstarted ibuprofen question. The product strength, amount, and exact time are unconfirmed. Keep this report separate from charted prescriptions; an empty medication list does not establish no medicine use. The ankle and OTC-medicine scenario is fictional intake, not an existing FHIR diagnosis or prescription. Retrieve only relevant chart context; unrelated sinusitis history does not explain this visit. If no relevant chart match is found, say so. Do not label this a sprain or fracture, invent imaging or examination findings, or recommend treatment or work clearance.\n\n",
+      meds:"Check the active medication record for synthetic Patient/86326 (Florence Lera Predovic). State exactly what is and is not present in FHIR. Separately include the intake report of OTC Aleve (naproxen sodium) this morning, with unconfirmed strength, amount, and exact time. Ibuprofen is being considered but has not been taken. An empty active-prescription list does not negate reported OTC use; do not interpret absence as safety or recommend a medicine change."
     }
   },
   {
-    id:"CASE-1058", stateKey:"CASE-1058-back-flare-v2", patientId:"96320", name:"Jacques Pedro Abernathy", initials:"JA",
+    id:"CASE-1058", stateKey:"CASE-1058-back-flare-v3", patientId:"94901", name:"Jacques Pedro Abernathy", initials:"JA",
     identity:"54 years · male · Gardner", reason:"Back-pain flare affecting sleep and work",
     status:"In review", owner:"Dr. Chen", wait:"31 min", currentStep:3, source:"Nurse intake · 09:19",
     scenarioNote:"Fictional in-person demo intake. The lifting episode, symptoms, and functional limits are scripted patient reports; historical FHIR conditions and orders are separate evidence.",
@@ -2382,12 +2382,12 @@ const CASES = [
     chart:["Active chronic low-back, neck, and general pain conditions","Active hydrocodone/acetaminophen, oxycodone/acetaminophen, and ibuprofen orders","Historical pain diagnoses and prescriptions do not establish the cause of this flare or current use"],
     confirm:["Assess the new flare and current function separately from historical pain diagnoses","Clarify work demands and sleep impact; no work clearance is established","Verify actual prescription and over-the-counter use without assuming concurrent use"],
     prompts:{
-      summary:"Prepare a pre-visit review for synthetic Patient/96320 (Jacques Pedro Abernathy). Lead with the corrected three-day back-pain flare, lifting context, functional limitations, sleep disruption, and relevant stated negatives. Separately verify relevant chronic-pain history in FHIR. Medication reconciliation is secondary context, not the reason for today's visit; active orders do not establish current use. Do not diagnose the flare, invent an examination or current imaging, recommend treatment, or provide work clearance.\n\n",
-      meds:"Reconcile active MedicationRequest records for synthetic Patient/96320 (Jacques Pedro Abernathy). Report each active order and authored date from FHIR, highlighting duplication or uncertainty without advising what to take."
+      summary:"Prepare a pre-visit review for synthetic Patient/94901 (Jacques Pedro Abernathy). Lead with the corrected three-day back-pain flare, lifting context, functional limitations, sleep disruption, and relevant stated negatives. Separately verify relevant chronic-pain history in FHIR. Medication reconciliation is secondary context, not the reason for today's visit; active orders do not establish current use. Do not diagnose the flare, invent an examination or current imaging, recommend treatment, or provide work clearance.\n\n",
+      meds:"Reconcile active MedicationRequest records for synthetic Patient/94901 (Jacques Pedro Abernathy). Report each active order and authored date from FHIR, highlighting duplication or uncertainty without advising what to take."
     }
   },
   {
-    id:"CASE-1062", stateKey:"CASE-1062-carmen-knee-v1", patientId:"40575", name:"Carmen Evan Wiegand", initials:"CW",
+    id:"CASE-1062", stateKey:"CASE-1062-carmen-knee-v2", patientId:"39153", name:"Carmen Evan Wiegand", initials:"CW",
     identity:"71 years · male · New Bedford", reason:"Knee pain and questions about pain medicines",
     status:"Ready for review", owner:"", wait:"8 min", currentStep:1, source:"Nurse intake · 09:46",
     scenarioNote:"Scripted demo intake. Knee symptoms and the question about trying ibuprofen are fictional patient reports, not FHIR observations or a treatment plan. Chart evidence is retrieved separately.",
@@ -2426,15 +2426,15 @@ const CASES = [
       ["Nurse","I'll pass on the week of right-knee pain, the effect on stairs and walks, and that you haven't started ibuprofen. Your current examination and actual medicine use still need to be checked against what you and the chart can confirm."]
     ],
     reported:["A week of more bothersome right-knee pain, five out of ten walking versus two at rest; still walking independently","Asks about trying ibuprofen/Advil but has not started it","Recognizes naproxen on an old list; actual use of listed medicines is unconfirmed"],
-    chart:["Chart history includes knee osteoarthritis, ischemic heart disease, hypertension, and kidney-related conditions","MedicationRequest/40598: naproxen 220 mg, active order authored December 20, 1994; MedicationRequest/40635: clopidogrel 75 mg, active order authored May 21, 2011","An active order and its authored date do not confirm present use; verify chart hints separately"],
+    chart:["Chart history includes knee osteoarthritis, ischemic heart disease, hypertension, and kidney-related conditions","MedicationRequest/39176: naproxen 220 mg, active order authored December 20, 1994; MedicationRequest/39213: clopidogrel 75 mg, active order authored May 21, 2011","An active order and its authored date do not confirm present use; verify chart hints separately"],
     confirm:["Assess the current knee symptoms separately from historical arthritis diagnoses","Confirm actual prescription and over-the-counter use, including whether naproxen is still taken","Retrieve relevant drug-label warnings for clinician review; no new medicine or treatment plan has been agreed"],
     prompts:{
-      summary:"Prepare a pre-visit review for synthetic Patient/40575 (Carmen Evan Wiegand). Lead with the one-week right-knee symptoms, walking/stair impact, reported negatives, and the unstarted ibuprofen question. Separately retrieve relevant FHIR history and active prescriptions. Fixture hints to verify include knee osteoarthritis, heart and kidney history, MedicationRequest/40598 (naproxen, authored December 20, 1994) and MedicationRequest/40635 (clopidogrel, authored May 21, 2011); verify their subject, status, and dates rather than presenting hints as retrieved evidence. Distinguish active orders from actual use and historical diagnoses from today's assessment. Do not invent an examination, infer present kidney function, recommend a medicine, or declare ibuprofen safe for this patient.\n\n",
-      meds:"Use read-only FHIR retrieval for synthetic Patient/40575 (Carmen Evan Wiegand) to list active MedicationRequest records with medicine names and authored dates. Highlight older orders, including naproxen and clopidogrel if verified, as items to reconcile rather than assuming they were stopped or are still taken. The scripted intake says ibuprofen is only being considered and has not been started. Separate orders, reported use, and unanswered questions; do not choose a medicine or change prescriptions."
+      summary:"Prepare a pre-visit review for synthetic Patient/39153 (Carmen Evan Wiegand). Lead with the one-week right-knee symptoms, walking/stair impact, reported negatives, and the unstarted ibuprofen question. Separately retrieve relevant FHIR history and active prescriptions. Fixture hints to verify include knee osteoarthritis, heart and kidney history, MedicationRequest/39176 (naproxen, authored December 20, 1994) and MedicationRequest/39213 (clopidogrel, authored May 21, 2011); verify their subject, status, and dates rather than presenting hints as retrieved evidence. Distinguish active orders from actual use and historical diagnoses from today's assessment. Do not invent an examination, infer present kidney function, recommend a medicine, or declare ibuprofen safe for this patient.\n\n",
+      meds:"Use read-only FHIR retrieval for synthetic Patient/39153 (Carmen Evan Wiegand) to list active MedicationRequest records with medicine names and authored dates. Highlight older orders, including naproxen and clopidogrel if verified, as items to reconcile rather than assuming they were stopped or are still taken. The scripted intake says ibuprofen is only being considered and has not been started. Separate orders, reported use, and unanswered questions; do not choose a medicine or change prescriptions."
     }
   },
   {
-    id:"CASE-1067", stateKey:"CASE-1067-focused-intake-v3", intakeStyle:"focused", patientId:"65157", name:"Dorsey Aurelio Macejkovic", initials:"DM",
+    id:"CASE-1067", stateKey:"CASE-1067-focused-intake-v4", intakeStyle:"focused", patientId:"63738", name:"Dorsey Aurelio Macejkovic", initials:"DM",
     identity:"61 years · male · Dracut", reason:"Ongoing chest pressure · breathlessness · sweating",
     status:"Ready for review", owner:"", wait:"0 min", currentStep:1, source:"Nurse intake · 09:54",
     scenarioNote:"Scripted demo intake. Symptoms, pain scores, and patient-reported history are fictional, not FHIR observations. Queue priority is proposed separately from this conversation.",
@@ -2467,11 +2467,11 @@ const CASES = [
       ["Nurse","I've noted that it started at rest about twenty minutes ago and is still eight out of ten, with discomfort in your left arm, breathlessness, sweating, and nausea. I'll record those details as you've described them."]
     ],
     reported:["Ongoing central chest pressure rated eight out of ten, starting at rest about twenty minutes before intake","Discomfort extends into the left upper arm; repositioning has not relieved it","Breathlessness, sweating, nausea, and lightheadedness reported during intake"],
-    chart:["Condition/65992 records a non-ST elevation myocardial infarction with onset July 14, 2023","The historical condition does not establish the cause of today's scripted symptoms","No current ECG, vital signs, or test results are provided by the intake"],
+    chart:["Condition/64573 records a non-ST elevation myocardial infarction with onset July 14, 2023","The historical condition does not establish the cause of today's scripted symptoms","No current ECG, vital signs, or test results are provided by the intake"],
     confirm:["Current clinician assessment and response status remain to be established","Keep the 2023 chart history separate from the new fictional symptoms","Do not assume diagnosis, stabilization, or completed transfer"],
     prompts:{
-      summary:"Prepare a brief intake-to-chart handoff for synthetic Patient/65157 (Dorsey Aurelio Macejkovic). Lead with the patient's reported onset, pain severity, location, spread, and associated symptoms. The intake documents symptom questions and patient answers; it does not document escalation, treatment, or a clinical assessment. For separate chart context, if available, verify Condition/65992, subject and onset (fixture hint July 14, 2023). That historical NSTEMI record is not a diagnosis of the present episode even if its FHIR status is active. If retrieval fails, say chart context is unverified; do not withhold the intake handoff or imply escalation must wait for retrieval. Do not invent observations, ECG findings, a diagnosis, treatment, nurse escalation, response-team arrival, or completed transfer.\n\n",
-      meds:"Review medication history read-only for synthetic Patient/65157 (Dorsey Aurelio Macejkovic), if relevant to the clinician question. Keep orders separate from actual use; do not choose treatment or infer a queue priority."
+      summary:"Prepare a brief intake-to-chart handoff for synthetic Patient/63738 (Dorsey Aurelio Macejkovic). Lead with the patient's reported onset, pain severity, location, spread, and associated symptoms. The intake documents symptom questions and patient answers; it does not document escalation, treatment, or a clinical assessment. For separate chart context, if available, verify Condition/64573, subject and onset (fixture hint July 14, 2023). That historical NSTEMI record is not a diagnosis of the present episode even if its FHIR status is active. If retrieval fails, say chart context is unverified; do not withhold the intake handoff or imply escalation must wait for retrieval. Do not invent observations, ECG findings, a diagnosis, treatment, nurse escalation, response-team arrival, or completed transfer.\n\n",
+      meds:"Review medication history read-only for synthetic Patient/63738 (Dorsey Aurelio Macejkovic), if relevant to the clinician question. Keep orders separate from actual use; do not choose treatment or infer a queue priority."
     }
   }
 ];
