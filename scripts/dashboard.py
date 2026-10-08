@@ -2951,21 +2951,16 @@ const VISIT_SUGGESTIONS={follow_up:'Find follow-up dates',prescription:'Prepare 
 function visitActionsGuidance(c){
   const slots=visitSlots(c).filter(slot=>visitSlotAvailable(slot)),s=getState(c);
   return '\nINLINE VISIT ACTIONS — LOCAL SIMULATION ONLY\n'+
-    'Use demo-visit-actions to prepare follow-ups, prescription drafts, X-ray or blood-test requests, or to offer concrete next steps conversationally in chat. '+
-    'Do not use a FHIR write skill, terminal, browser, API, or external booking/prescription/order service for these actions. Only the app can confirm a local demo action, from a card or an explicit appointment selection in chat. '+
-    'Display wording: the app already identifies this as a demo. In user-facing follow-up and blood-test replies, omit demo, fictional, and simulated qualifiers. Use Follow-up clinic, follow-up appointment, and blood-test request. Show APT-/LAB- references without the internal DEMO- prefix. This changes wording only; all existing local-only action restrictions still apply. '+
-    'Answer the current question first using the appropriate evidence skill. Existing blood results require read-only FHIR retrieval with dates, units and source IDs; a new lab request does not supply results. Never invent results. Prefer exact result dates to guessed elapsed ages. Limit missing-result claims to the records actually searched. '+
-    'Match the stage of the visit. Generating or regenerating a summary never offers actions. In patient Q&A, answer the evidence question first. Offer at most TWO relevant next steps when the clinician discusses a plan, follow-up or wrapping up. A focused blood-result or monitoring question also supports a lab suggestion when retrieved evidence reveals a relevant unresolved testing gap: only historical results, no newer results found, or a documented uncompleted test. Explain that gap with source dates and citations, then ask whether to prepare a blood-test request for clinician review. Do not wait for an order request just to offer this option. A routine chart lookup with no relevant gap needs no offer. '+
-    'A testing gap is a reason to ask, not proof that a test is due or medically necessary. Do not invent a retesting interval, choose tests, or say a lab appointment is booked. Keep actions empty until the clinician agrees to a draft. Their agreement does not select the tests listed in old results: leave unspecified tests/reason blank. Other proactive options remain plan-based: a clinician medication plan can offer a prescription draft; arranging the next appointment can offer the supplied times; wrapping up confirmed actions can offer the visit summary. '+
-    'Speak the suggestion naturally in reply and ask a useful next question; never make the clinician click a suggestion button to discover the options. For follow_up, the app immediately displays the three supplied dates as a numbered list with a chat booking instruction. Introduce that list and ask which time works; do not duplicate or invent a numbered list in reply. If a requested interval does not match the supplied slots, say so and ask whether an offered date works; never imply it satisfies that interval. For other suggestions, ask if the clinician wants that draft and ask for missing clinical details. A clear affirmative reply to your single previous offer counts as a request for its draft. '+
-    'These are optional workflow choices, not new clinical recommendations: do not choose a drug, dose, test, imaging site, diagnosis, or treatment. Do not offer routine follow-up during an unresolved immediate-attention scenario. '+
-    'Avoid generic menus after every reply. Do not repeat an active or dismissed offer, or an action type with an active draft/confirmed record. If a previous follow-up booking was cancelled and the clinician asks to arrange follow-up again, return a fresh follow_up suggestion with current dates; the old accepted offer does not block the new request. Direct clinician requests still work at any time. '+
-    'For dashboard patient Q&A, return JSON with patientId and reply (your complete answer including any evidence citations). actions and suggestions are optional: omit either when it has no entries; omitted fields mean no actions or suggestions. Load demo-visit-actions when preparing action cards or relevant workflow offers; ordinary evidence answers do not need that skill. Use valid JSON with double-quoted keys and strings, no surrounding prose or code fences. reply must be nonempty clinician-facing Markdown: never embed JSON, schema examples, or action metadata inside it. '+
-    'actions holds up to FOUR explicit clinician requests. Each is {type,instruction,details}; type is follow_up, prescription, xray, or lab. instruction must quote the clinician request exactly. '+
-    'Details keys: follow_up {reason}; prescription {medication,dose,route,frequency,duration,quantity,pharmacy}; xray {bodySite,reason}; lab {tests,reason}. '+
-    'Every nonempty detail must be copied verbatim from clinician messages or clinician-edited draft fields, never from intake, old chart orders, assistant suggestions, or model knowledge. Use empty strings for missing details; the clinician can fill them in on the card. An explicit request for a draft must still return its card when required details are missing; do not return only a clarification question. Lab tests is one string listing the clinician-specified blood tests. '+
-    'For proactive options use suggestions, NOT actions: each suggestion is {type,evidence}, with type follow_up, prescription, xray, lab, or after_visit. evidence is an exact 8–500 character quote from a clinician message or optional clinician notes. For a lab offer after a testing gap, quote the current focused blood-result/monitoring question; explain the retrieved gap with citations in reply. For other offers, quote intent to plan that next step. Intake reports, chart findings, the generated handoff, or prior assistant suggestions alone are not a trigger. A suggestion contains no clinical order details. '+
-    'Only confirmed local ledger records establish a demo booking or request. Never claim real prescribing, collection, testing, dispensing, or sending. Cards and options appear below your reply in this chat; do not direct users to another tab. '+
+    'Load demo-visit-actions for action cards or workflow offers and follow its schema; ordinary evidence answers do not need it. '+
+    'Do not use a FHIR write skill, terminal, browser, API, or external service for these actions. Only the app confirms local actions; only confirmed ledger records establish bookings or requests. Never claim real prescribing, sending, dispensing, collection or testing. '+
+    'Answer the current question first. Existing blood results require read-only FHIR retrieval with dates, units and source IDs. Never invent results. A request supplies no results; limit missing-result claims to records searched. '+
+    'Offer at most TWO next steps during clinician planning, follow-up or wrapping up; never during handoff generation or solely from intake/old orders. A focused blood-result/monitoring question may also support a lab offer when retrieved evidence shows a relevant testing gap (historical results only, no newer result found, or an uncompleted test). Explain that gap with dated citations and ask whether to prepare a request. It does not establish that testing is due or necessary; never invent intervals or choose tests. '+
+    'Speak offers and useful next questions in reply, without a button gate. Appointment discussions should offer follow_up: the app lists the three supplied times, so introduce them and ask which works without duplicating or inventing dates. Disclose any mismatch with a requested interval. Other offers need a clinician plan: medication plan → prescription, imaging plan → xray, confirmed actions/wrapping up → after_visit. '+
+    'No generic menus, repeated active/dismissed offers or types with active drafts/confirmed records. A cancelled booking can be replaced on a new request. Direct requests still work. Avoid routine follow-up during unresolved immediate attention. Do not choose drugs, doses, tests, imaging sites, diagnoses or treatment. '+
+    'Return one valid JSON object with patientId and reply; actions and suggestions are optional when empty. reply is the complete clinician-facing Markdown answer with citations, never embedded JSON or schema examples. No prose or code fences outside the object. '+
+    'actions: up to FOUR {type,instruction,details} entries for explicit requests only. A clear yes to a single draft offer counts. Quote the request exactly in instruction. Copy nonempty details verbatim from clinician messages, optional notes or clinician-edited fields, never intake, chart orders, assistant offers or knowledge. Return a card even with missing details, using empty strings; agreement alone does not select old result names as tests. '+
+    'suggestions: {type,evidence}, using follow_up, prescription, xray, lab or after_visit. evidence is an exact 8–500 character clinician-message/notes quote: the focused question for a testing gap, otherwise intent to plan that step. Offers do not authorize actions or supply order details. '+
+    'Cards appear in this chat. In follow-up/blood-test replies omit demo/fictional/simulated qualifiers; use Follow-up clinic and APT-/LAB- references without DEMO-. Local-only restrictions still apply. '+
     'Patient ID: '+c.patientId+'. Available fictional appointment slots (clinic local time): '+JSON.stringify(slots)+'.\n'+
     'Current local action ledger: '+JSON.stringify(s.visitActions||[])+'.\n'+
     'Suggestion history (respect dismissals; cancelled bookings can be replaced on a new follow-up request): '+JSON.stringify((s.visitSuggestions||[]).map(({type,status})=>({type,status})))+'.\n';
@@ -4000,44 +3995,63 @@ async function showQueueReview({showActivity=true}={}){
   if(epoch!==chatEpoch||activeAgentCase||runId!==queueReview.runId)return null;
   if(chat.busy)return chat;
   const key="queue-review:"+runId;
-  if(chat.key!==key)chat.load({
-    key,sessionId:queueReview.sessionId,messages:queueReview.history,draft:queueReview.draft,
-    title:"Chat with CliniClaw",placeholder:"Ask CliniClaw about the waiting room…",
-    prepareMessage(text,request){
-      if(request?.kind==="queue-review")return text;
-      return demoContext()+"Continue the waiting-room conversation. Answer the user's question directly in plain language. "+
-        "This is an ordinary chat turn, not a structured queue review. Do not return a queue-review JSON object. "+
-        "Chat does not change patient placement or saved handoffs. If asked to update the queue, explain that Triage Queue starts that review. "+
-        "Keep each patient's intake reports separate from dated FHIR facts; use read-only chart lookups when needed. "+
-        "Do not diagnose, recommend treatment, write records, or claim care has occurred. "+
-        "The following open-patient context includes the current applied priorities and full intake transcripts.\n\n"+
-        JSON.stringify(queueSnapshot().patients)+"\n\nUser question: "+text;
-    },
-    transformAnswer(answer,request){
-      if(epoch!==chatEpoch||queueReview.runId!==runId)throw new Error("This queue review was superseded.");
-      // Only an explicit triage run can validate and apply a proposed order.
-      if(request?.kind!=="queue-review")return answer;
-      if(queueReviewStale())throw new Error("The queue changed during review. Run Triage Queue again; existing placements are unchanged.");
-      let proposal;
-      try{proposal=parseQueueReview(answer,queueReview.snapshot,runId);}
-      catch(error){error.code="invalid_queue_review";throw error;}
-      queueReview={...queueReview,proposal,status:"ready",error:""};
-      // Paint after the chat finishes so the room and sidebar update together.
-      persist();
-      return queueReviewMarkdown(proposal);
-    },
-    onChange(snapshot){
-      if(epoch!==chatEpoch||queueReview.runId!==runId)return;
-      queueReview={...queueReview,sessionId:snapshot.sessionId||"",history:snapshot.messages,draft:snapshot.draft||""};
-      persist();
-    },
-    onActivity(activity){
-      if(epoch!==chatEpoch||queueReview.runId!==runId)return;
-      roomAgentActivity={runId,text:activity.text};updateWaitingRoomAgentChat();
-    },
-    onStatus(running,label){if(epoch===chatEpoch&&queueReview.runId===runId)setAgentLive(running,label);},
-    onEscape(){escapeAgentPanel();}
-  });
+  if(chat.key!==key){
+    let sentContext=null,pendingContext=null;
+    chat.load({
+      key,sessionId:queueReview.sessionId,messages:queueReview.history,draft:queueReview.draft,
+      title:"Chat with CliniClaw",placeholder:"Ask CliniClaw about the waiting room…",
+      prepareMessage(text,request,snapshot){
+        pendingContext=null;
+        if(request?.kind==="queue-review")return text;
+        const patients=queueSnapshot().patients;
+        const previous=snapshot.sessionId&&sentContext?.sessionId===snapshot.sessionId?sentContext.patients:[];
+        const changed=patients.filter(p=>!previous.some(old=>old.patientId===p.patientId&&old.intake===p.intake));
+        pendingContext={patients,sessionId:snapshot.sessionId};
+        return demoContext()+"Continue the waiting-room conversation. Answer the user's question directly in plain language. "+
+          "This is an ordinary chat turn, not a structured queue review. Do not return a queue-review JSON object. "+
+          "Chat does not change patient placement or saved handoffs. If asked to update the queue, explain that Triage Queue starts that review. "+
+          "Keep each patient's intake reports separate from dated FHIR facts; use read-only chart lookups when needed. "+
+          "Do not diagnose, recommend treatment, write records, or claim care has occurred. "+
+          "CURRENT OPEN PATIENTS (this list replaces earlier queue membership and priorities):\n"+
+          JSON.stringify(patients.map(({caseId,patientId,name,reason,waitMinutes,appliedPriority})=>
+            ({caseId,patientId,name,reason,waitMinutes,appliedPriority})))+
+          "\nINTAKE UPDATES (replace these patients' earlier transcripts; otherwise use the intake already in this session):\n"+
+          JSON.stringify(changed.map(({patientId,name,intake})=>({patientId,name,intake})))+
+          "\nIf needed evidence is missing after context compression, say so or retrieve it; never invent it.\nUser question: "+text;
+      },
+      onTurnEnd(ok,snapshot){
+        if(epoch!==chatEpoch||queueReview.runId!==runId)return;
+        if(!ok)sentContext=null;
+        else if(pendingContext)sentContext=snapshot.sessionId&&(!pendingContext.sessionId||pendingContext.sessionId===snapshot.sessionId)
+          ?{...pendingContext,sessionId:snapshot.sessionId}:null;
+        pendingContext=null;
+      },
+      transformAnswer(answer,request){
+        if(epoch!==chatEpoch||queueReview.runId!==runId)throw new Error("This queue review was superseded.");
+        // Only an explicit triage run can validate and apply a proposed order.
+        if(request?.kind!=="queue-review")return answer;
+        if(queueReviewStale())throw new Error("The queue changed during review. Run Triage Queue again; existing placements are unchanged.");
+        let proposal;
+        try{proposal=parseQueueReview(answer,queueReview.snapshot,runId);}
+        catch(error){error.code="invalid_queue_review";throw error;}
+        queueReview={...queueReview,proposal,status:"ready",error:""};
+        // Paint after the chat finishes so the room and sidebar update together.
+        persist();
+        return queueReviewMarkdown(proposal);
+      },
+      onChange(snapshot){
+        if(epoch!==chatEpoch||queueReview.runId!==runId)return;
+        queueReview={...queueReview,sessionId:snapshot.sessionId||"",history:snapshot.messages,draft:snapshot.draft||""};
+        persist();
+      },
+      onActivity(activity){
+        if(epoch!==chatEpoch||queueReview.runId!==runId)return;
+        roomAgentActivity={runId,text:activity.text};updateWaitingRoomAgentChat();
+      },
+      onStatus(running,label){if(epoch===chatEpoch&&queueReview.runId===runId)setAgentLive(running,label);},
+      onEscape(){escapeAgentPanel();}
+    });
+  }
   return chat;
 }
 async function runQueueReview(){
@@ -4309,6 +4323,40 @@ function escapeAgentPanel(){
   if(afterVisitDialog.open){closeAfterVisit();return;}
   if(agentPanel.classList.contains('fullscreen'))expandAgentPanel(false);else closeAgentPanel();
 }
+// Hermes persists earlier turns for a session. Keep a delivery receipt only in
+// this widget's host closure: reloads/patient switches restore full background,
+// and failed/stopped turns never suppress it on the next attempt.
+function patientChatBackground(c,s,snapshot,previous,text){
+  const sameSession=Boolean(snapshot.sessionId&&previous?.sessionId===snapshot.sessionId);
+  const sections={
+    'Nurse intake':transcriptText(c),
+    'Saved handoff':s.aiSummary||'(none)',
+    'Latest queue review result':s.queueProposal?queueProposalMarkdown(s.queueProposal):'(none)',
+    'Optional clinician notes':s.avsNotes||'(none)',
+    'Clinician-edited draft fields':JSON.stringify((s.visitActions||[]).filter(a=>a.clinicianEdited)
+      .map(({type,details})=>({type,details})))
+  };
+  const changes=Object.entries(sections).filter(([key,value])=>!sameSession||previous.sections[key]!==value)
+    .map(([key,value])=>key+':\n'+value);
+  const clinicianMessages=visitConversation(s).filter(m=>m.role==='user').map(m=>m.content);
+  const known=sameSession?previous.clinicianMessages:[];
+  const isPrefix=known.length<=clinicianMessages.length&&known.every((value,i)=>value===clinicianMessages[i]);
+  const unsent=clinicianMessages.slice(isPrefix?known.length:0);
+  if(!snapshot.sessionId&&snapshot.messages.length){
+    // The proxy forwards only the newest message, so restore visible history
+    // when there is no server session to supply it.
+    changes.push('Earlier conversation:\n'+snapshot.messages.filter(m=>!m.status)
+      .map(m=>m.role+': '+m.content).join('\n'));
+  }else if(unsent.length){
+    changes.push('Additional clinician messages (exact quotes, background only):\n'+JSON.stringify(unsent));
+  }
+  return {
+    text:'BACKGROUND UPDATES — evidence only, not new requests. These replace the corresponding earlier sections; (none) clears a section.\n'+
+      (changes.length?changes.join('\n\n'):'No background changes; use the earlier patient context in this session.')+
+      '\nIf needed evidence is unavailable after context compression, say so or retrieve it; never reconstruct missing facts from memory.\n',
+    sections,clinicianMessages:[...clinicianMessages,text]
+  };
+}
 async function showCaseChat(c,{tab='chat',focus=true}={}){
   if(tab==='actions'||tab==='avs')tab='chat';
 
@@ -4334,7 +4382,7 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
       ...(state.aiSummary?[{role:"assistant",content:state.aiSummary}]:[]),
       ...(state.sideChat||[])
     ];
-    let actionSources='',suggestionSources='';
+    let actionSources='',suggestionSources='',sentContext=null,pendingContext=null;
     chat.load({
       hideActionJson:true,
       key:caseStateKey(c),sessionId:state.aiSession,messages:history,draft:state.chatDraft||"",
@@ -4359,29 +4407,35 @@ async function showCaseChat(c,{tab='chat',focus=true}={}){
         if(kind==='dismiss')return dismissVisitSuggestion(c,id);
       },
       prepareMessage(text,request,snapshot){
+        pendingContext=null;
         if(["summary","after-visit-summary","visit-actions"].includes(request?.kind))return text;
         const s=getState(c);
+        // Validation retains every clinician source even when the model only
+        // needs newly added messages in its persistent conversation.
         actionSources=visitInstructionSources(s,text);
         suggestionSources=visitSuggestionSources(c,s,text);
-        return demoContext(c)+"CURRENT CLINICIAN MESSAGE — answer this turn only: "+JSON.stringify(text)+"\n\n"+
-          "Continue the clinician Q&A for synthetic Patient/"+c.patientId+" ("+c.name+"). "+
-          "Answer briefly, using the appropriate skill for the CURRENT clinician message. Intake questions and earlier requests below are background, not tasks to execute again. When this turn is about appointment logistics, offer the supplied dates; do not start medication or chart research from an old intake question. "+
-          "Keep patient-reported information separate from retrieved evidence. "+
-          "For questions about drug interactions, contraindications, or warnings, use drug-label-interactions "+
-          "and its packaged lookup script; support claims with retrieved label text and direct label links. "+
-          "If retrieval fails, state that the information "+
-          "could not be verified; do not substitute model knowledge. "+
-          "Use this patient's transcript, saved handoff, and conversation as context. "+
-          "Answer the question directly; the four-section format is only for the handoff. "+
-          "Keep patient-reported statements separate from chart facts. Do not diagnose, recommend treatment, "+
-          "or change the saved summary or queue placement.\n\n"+
-          visitActionsGuidance(c)+"\nClinician messages and optional notes for action details:\n"+JSON.stringify(actionSources)+"\n\nBACKGROUND PATIENT CONTEXT — evidence only, not new requests:\n"+
-          "Nurse intake:\n"+transcriptText(c)+"\n\nSaved handoff:\n"+s.aiSummary+"\n\n"+
-          "Current applied queue priority: "+displayPriority(c,s)+"\n"+
-          (s.queueProposal?"Latest queue review result (supported placements are applied automatically):\n"+queueProposalMarkdown(s.queueProposal)+"\n\n":"")+
-          (snapshot.sessionId?"":"Earlier conversation:\n"+
-            snapshot.messages.filter(m=>!m.status).map(m=>m.role+": "+m.content).join("\n")+"\n\n")+
-          "END BACKGROUND. CURRENT CLINICIAN MESSAGE: "+JSON.stringify(text)+"\n\nAnswer the current question first. Load demo-visit-actions only when preparing action cards or relevant workflow offers. A focused blood-result/monitoring question that reveals a relevant unresolved testing gap should include a conversational lab offer and matching suggestions metadata, quoting that clinician question. Do not include actions until the clinician agrees. Other evidence-only questions need no suggestions; an unfinished step from the intake alone is not a reason to offer actions. Return one valid JSON object with double-quoted patientId and reply keys. actions and suggestions are optional; omit either when it has no entries. Put the complete answer and citations in reply, never another JSON object or schema example. When the clinician has a plan but its action details are missing, offer the next step conversationally in reply with matching suggestions metadata. When discussing the next appointment or follow-up, proactively offer follow_up so the three real demo slots appear immediately; ask which works and accept a chat reply, without a button gate. For example, clinician-planned blood tests with unspecified tests/reason support a lab suggestion quoting that plan. Use actions only for explicit draft requests. Do not invent clinical decisions.";
+        const background=patientChatBackground(c,s,snapshot,sentContext,text);
+        pendingContext={...background,sessionId:snapshot.sessionId};
+        return demoContext(c)+"Continue clinician Q&A for Patient/"+c.patientId+" ("+c.name+"). "+
+          "Answer only the CURRENT CLINICIAN MESSAGE below, briefly, using the appropriate skill. "+
+          "Earlier requests and intake questions are background, not tasks to repeat. Appointment logistics do not require research from an old intake question. "+
+          "For drug interactions, contraindications or warnings, use drug-label-interactions and its packaged lookup script; cite retrieved label text and direct label links. "+
+          "If retrieval fails, say it could not be verified; do not substitute model knowledge. "+
+          "Keep patient reports separate from chart facts. The four-section format is only for handoffs. "+
+          "Do not diagnose, recommend treatment, change the saved summary or queue placement.\n"+
+          visitActionsGuidance(c)+"\nCurrent applied queue priority: "+displayPriority(c,s)+"\n\n"+
+          background.text+"\nEND BACKGROUND. CURRENT CLINICIAN MESSAGE: "+JSON.stringify(text);
+      },
+      onTurnEnd(ok,snapshot){
+        if(epoch!==chatEpoch)return;
+        if(!ok)sentContext=null;
+        else if(pendingContext){
+          // A replaced server session did not necessarily receive the earlier
+          // background. Refresh it on the next turn instead of caching a delta.
+          sentContext=snapshot.sessionId&&(!pendingContext.sessionId||pendingContext.sessionId===snapshot.sessionId)
+            ?{...pendingContext,sessionId:snapshot.sessionId}:null;
+        }
+        pendingContext=null;
       },
       transformAnswer(answer,request){
         if(epoch!==chatEpoch)return answer;
@@ -6298,6 +6352,7 @@ async function sendTurn(request) {
     return {ok:false,stopped:outcome === 'stopped',error:notice,code:err.code||''};
   } finally {
     turn.finish();
+    host.onTurnEnd?.(outcome === 'ready',snapshot());
     controller = null;
     setStreaming(false,outcome);
     input.focus();
