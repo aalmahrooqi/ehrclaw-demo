@@ -2499,8 +2499,15 @@ const agentLive = document.getElementById("agentLive");
 const agentRegenerate = document.getElementById("agentRegenerate");
 const agentQueuePropose = document.getElementById("agentQueuePropose");
 const agentExpand = document.getElementById("agentExpand");
-const chatReady = new Promise(resolve => agentFrame.addEventListener("load",
-  () => resolve(agentFrame.contentWindow.CliniClawChat), {once:true}));
+const chatReady = new Promise(resolve => {
+  const ready=()=>{
+    const chat=agentFrame.contentWindow?.CliniClawChat;
+    if(!chat)return;
+    agentFrame.removeEventListener("load",ready);resolve(chat);
+  };
+  agentFrame.addEventListener("load",ready);
+  ready(); // A cached frame can finish loading before this script registers its listener.
+});
 let selected = CASES[0].id;
 let workspaceMode = "queue";
 let patientTab = "intake";
@@ -4510,16 +4517,27 @@ for(const [index,button] of patientTabButtons.entries()){
 }
 document.getElementById("reset").addEventListener("click", async () => {
   if(!window.confirm("Reset Demo?\n\nThis clears saved demo summaries, queue reviews, chat history, visit actions, demo appointments, and drafts in this browser, and stops any active chat stream.\n\nFHIR records and agent memories are not changed. Continue?"))return;
-  chatEpoch++;
-  const resetEpoch=chatEpoch;
-  const chat=await chatReady;
-  await chat.clear();
-  if(resetEpoch!==chatEpoch)return;
-  setAgentLive(false,"ready");
-  saved={};queueReview=emptyQueueReview();workspaceMode="queue";minimizedPanel=null;patientScrollPositions.clear();persist();selected=CASES[0].id;filter="all";search.value="";
+  const resetEpoch=++chatEpoch,button=document.getElementById("reset");
+  button.disabled=true;
+  // Clear saved state before awaiting the iframe or stream shutdown. Late callbacks
+  // belong to the old epoch and cannot restore the discarded patient sessions.
+  saved={};queueReview=emptyQueueReview();workspaceMode="queue";minimizedPanel=null;patientScrollPositions.clear();
+  try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
+  persist();selected=CASES[0].id;filter="all";search.value="";
   activeAgentCase=null;closeAgentPanel();expandAgentPanel(false);
   document.querySelectorAll(".filter").forEach(x=>x.classList.toggle("active",x.dataset.filter==="all"));
-  render();
+  setAgentLive(true,"resetting demo");render();
+  // A stalled/rejected cleanup must not leave the old chat session usable. Reload
+  // this workspace as a fallback, after its saved state has already been cleared.
+  const reload=()=>{if(resetEpoch===chatEpoch)window.location.reload();};
+  const fallback=setTimeout(reload,1500);
+  try{
+    await agentFrame.contentWindow?.CliniClawChat?.clear();
+  }catch(e){reload();}
+  finally{
+    clearTimeout(fallback);
+    if(resetEpoch===chatEpoch){setAgentLive(false,"ready");button.disabled=false;}
+  }
 });
 
 const themeBtn=document.getElementById("themeToggle");
