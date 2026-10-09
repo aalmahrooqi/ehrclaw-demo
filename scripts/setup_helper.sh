@@ -15,7 +15,7 @@ if docker ps -q -f "name=^health-demo-hapi$" -f status=running | grep -q .; then
 else
     docker compose -f docker-compose.yaml up -d
 fi
-docker compose -f docker-compose.dashboard.yaml up -d
+docker compose -f docker-compose.dashboard.yaml up -d --build
 
 SANDBOX_NAME="hermes-health"
 HERMES_MAX_TOKENS="${HERMES_MAX_TOKENS:-16384}"
