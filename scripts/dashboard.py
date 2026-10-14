@@ -1144,10 +1144,24 @@ class Handler(BaseHTTPRequestHandler):
             self._proxy_chat()
         elif parsed.path == "/api/chat/new":
             self._new_chat_session()
+        elif parsed.path == "/api/reset-prefix-cache":
+            self._reset_prefix_cache()
         elif parsed.path == "/api/upload":
             self._upload_image(parsed)
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _reset_prefix_cache(self) -> None:
+        """Best-effort local vLLM cache reset; never retry or fail the demo reset."""
+        try:
+            request = urllib.request.Request(
+                "http://127.0.0.1:8000/reset_prefix_cache", data=b"", method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=2) as response:
+                response.read()
+        except Exception:  # vLLM may be unavailable or cache reset may be disabled.
+            pass
+        self._send(204, b"", "text/plain")
 
     def _upload_image(self, parsed) -> None:
         """Drop an image posted by the chat composer into the sandbox."""
@@ -4762,6 +4776,8 @@ document.getElementById("reset").addEventListener("click", async () => {
   }catch(e){reload();}
   finally{
     clearTimeout(fallback);
+    // One best-effort server-side POST; do not wait, retry, or surface failures.
+    fetch('/api/reset-prefix-cache',{method:'POST',keepalive:true}).catch(()=>{});
     if(resetEpoch===chatEpoch){setAgentLive(false,"ready");button.disabled=false;}
   }
 });
